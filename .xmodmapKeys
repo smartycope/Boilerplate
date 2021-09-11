@@ -1,0 +1,9 @@
+!keycode 112 = Home NoSymbol Home
+!keycode 117 = End NoSymbol End
+!keycode 150 = XF86ScreenSaver NoSymbol XF86ScreenSaver
+!keycode 156 = XF86ScreenSaver NoSymbol XF86ScreenSaver
+keycode 135 = Control_R NoSymbol Control_R
+keycode 105 = Home NoSymbol Home
+keycode 90  = End NoSymbol End
+keycode 66  = Control_L NoSymbol Control_L
+!keycode 66  =  Caps_Lock NoSymbol Caps_Lock
