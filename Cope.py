@@ -1079,6 +1079,38 @@ def decorator(*decoratorArgs, **decoratorKwArgs):
 """
 
 
+
+"""
+DECORATOR SYNTAX:
+
+def decorator(*decoratorArgs, **decoratorKwArgs):
+    def wrap(functionBeingDecorated):
+        def innerWrap(*decoratedArgs, **decoratedKwArgs):
+            return functionBeingDecorated(*decoratedArgs, **decoratedKwArgs)
+        return innerWrap
+    return wrap
+
+COPY version:
+
+def decorator(*decoratorArgs, **decoratorKwArgs):
+    def wrap(func):
+        def innerWrap(*funcArgs, **funcKwArgs):
+            return func(*funcArgs, **funcKwArgs)
+        return innerWrap
+    return wrap
+
+
+"""
+
+
+
+
+
+
+
+
+
+
 #* TESTING
 
 #* parseColorParams tests
