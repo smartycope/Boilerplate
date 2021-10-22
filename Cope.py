@@ -40,7 +40,7 @@ DISPLAY_PATH = False
 DISPLAY_FUNC = False
 DISPLAY_LINK = False
 HIDE_TODO    = False
-FORCE_TODO_LINK = False
+# FORCE_TODO_LINK = False
 
 # Default color constants
 DEFAULT_COLOR = (204, 204, 204)
@@ -56,7 +56,7 @@ EMPTY_COLOR =         NOTE_CALL_COLOR
 CONTEXT_COLOR =       None
 COUNT_COLOR =         (34, 111, 157)
 DEFAULT_DEBUG_COLOR = (34, 179, 99)
-TODO_COLOR            = NOTE_CALL_COLOR
+TODO_COLOR            = (128, 64, 64)
 STACK_TRACE_COLOR     = (159, 148, 211)
 
 #* Convenience commonly used paths. ROOT can be set by the setRoot() function
@@ -203,8 +203,7 @@ def _debugGetLink(calls=0, full=False, customMetaData=None):
     _printLink(d.filename, d.lineno, d.function if full else None)
 
 # TODO This doesn't quite work properly
-def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, minItems: int=2, maxItems: int=10,
-                color: int=0) -> str:
+def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, minItems: int=2, maxItems: int=10) -> str:
     """ "Cast" a tuple, list, set or dict to a string, automatically shorten
         it if it's long, and display how long it is.
 
@@ -223,7 +222,7 @@ def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, m
         if type(v) is set:
             v = tuple(v)
 
-        ellipsis = f', \033[0m...\033[{_colors[color]}m '
+        ellipsis = f', ... '
         length = f'(len={len(v)})'
 
         if limitToLine:
@@ -233,14 +232,14 @@ def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, m
             prevSecondHalf = secondHalf
             index = 0
 
-            # The 46 is a fugde factor. I don't know why it needs to be there, but it works.
+            # The 54 is a fugde factor. I don't know why it needs to be there, but it works.
             while (6 + 54 + len(length) + len(firstHalf) + len(secondHalf)) < get_terminal_size().columns:
                 index += 1
                 firstHalf  = str(v[0:round((minItems+index)/2)])[:-1]
                 secondHalf = str(v[-round((minItems+index)/2)-1:-1])[1:]
                 prevFirstHalf = firstHalf
                 prevSecondHalf = secondHalf
-                if index > KILL_IT:
+                if index > 6:
                     break
 
             firstHalf = prevFirstHalf
@@ -297,7 +296,14 @@ def _printDebugCount(leftAdjust=2, color: int=COUNT_COLOR):
     with coloredOutput(color):
         print(f'{str(_debugCount)+":":<{leftAdjust+2}}', end='')
 
-def _debugGetVarName(var, full=True, calls=1):
+def _debugManualGetVarName(var, full=True, calls=2, metadata=None):
+    try:
+        return re.search(r'(?<=debug\().+(?=,(\s)?[name color showFunc showFile showPath useRepr calls background limitToLine minItems maxItems stackTrace raiseError clr _repr trace bg throwError throw \) ])',
+                         metadata.code_context[0]).group()
+    except:
+        return '?'
+
+def _debugGetVarName(var, full=True, calls=1, metadata=None):
     try:
         return argname('var', frame=calls+1)
     # It's a *likely* string literal
@@ -306,17 +312,19 @@ def _debugGetVarName(var, full=True, calls=1):
             return None
         else:
             try:
+                # print('var:', var)
+                # print('var type:', type(var))
                 return nameof(var, frame=calls+1)
             except Exception as e:
-                if VERBOSE:
+                if VERBOSE and not isinstance(var, Exception):
                     raise e
                 else:
-                    return '?'
+                    return _debugManualGetVarName(var, full, calls+1, metadata)
     except VarnameRetrievingError as e:
         if VERBOSE:
             raise e
         else:
-            return '?'
+            return _debugManualGetVarName(var, full, calls+1, metadata)
 
 def _debugGetAdjustedFilename(filename):
     return filename[len(ROOT)+1:]
@@ -327,13 +335,19 @@ def _debugGetContext(metadata, useVscodeStyle, showFunc, showFile, showPath):
         if useVscodeStyle:
             s = f'["{metadata.filename if showPath else _debugGetAdjustedFilename(metadata.filename)}", line {metadata.lineno}'
             if showFunc:
-                s += f', in {metadata.function}()'
+                if metadata.function.startswith('<'):
+                    s += ', in Global Scope'
+                else:
+                    s += f', in {metadata.function}()'
             s += '] '
             return s
         else:
             context = str(metadata.lineno)
             if showFunc:
-                context = metadata.function + '()->' + context
+                if metadata.function.startswith('<'):
+                    context = 'Global Scope' + context
+                else:
+                    context = metadata.function + '()->' + context
 
             if showFile:
                 context = (metadata.filename if showPath else basename(metadata.filename)) + '->' + context
@@ -345,6 +359,19 @@ def _debugGetContext(metadata, useVscodeStyle, showFunc, showFile, showPath):
 def _debugPrintStackTrace(calls, useVscodeStyle, showFunc, showFile, showPath):
     for i in reversed(stack()[3:]):
         print('\t', _debugGetContext(i, useVscodeStyle, showFunc, showFile, showPath))
+
+def _debugBeingUsedAsDecorator(funcName, metadata=None, calls=1):
+    """ Return 1 if being used as a function decorator, 2 if as a class decorator, and 0 if neither. """
+    if metadata is None:
+        metadata = _debugGetMetaData(calls+1)
+
+    if funcName not in metadata.code_context[0]:
+        if 'def ' in metadata.code_context[0]:
+            return 1
+        if 'class ' in metadata.code_context[0]:
+            return 2
+
+    return False
 
 # A unique dummy class for the var parameter
 class _None: pass
@@ -366,7 +393,7 @@ def debug(var=_None,                # The variable to debug
           maxItems: int=10,         # Maximum number of items to print when printing iterables, use None or negative to specify no limit
           stackTrace: bool=False,   # Print a stack trace
           raiseError: bool=False,   # If var is an error type, raise it
-          clr=_None,                 # Alias of color
+          clr=_None,                # Alias of color
           _repr: bool=False,        # Alias of useRepr
           trace: bool=False,        # Alias of stackTrace
           bg: bool=False,           # Alias of background
@@ -401,80 +428,90 @@ def debug(var=_None,                # The variable to debug
             trace: Alias of stackTrace
             bg: Alias of background
     """
-    stackTrace = stackTrace or trace
-    useRepr = useRepr or _repr
-    background = background or bg
-    throwError = throw or throwError or raiseError
-    useColor = (DEFAULT_DEBUG_COLOR if clr is _None else clr) if color is _None else color
+    # Add a try statement here to make sure we don't throw an internal error when in use
+    try:
+        stackTrace = stackTrace or trace
+        useRepr = useRepr or _repr
+        background = background or bg
+        throwError = throw or throwError or raiseError
+        useColor = (DEFAULT_DEBUG_COLOR if clr is _None else clr) if color is _None else color
 
-    if maxItems < 0 or maxItems is None:
-        maxItems = 1000000
+        if maxItems < 0 or maxItems is None:
+            maxItems = 1000000
 
-    if isinstance(var, Warning):
-        useColor = WARN_COLOR
+        if isinstance(var, Warning):
+            useColor = WARN_COLOR
+        elif isinstance(var, Exception):
+            useColor = ALERT_COLOR
 
-    elif isinstance(var, Exception):
-        useColor = ALERT_COLOR
+        # +1 call because we don't want to get this line, but the one before it
+        metadata = _debugGetMetaData(calls+1)
 
-    # +1 call because we don't want to get this line, but the one before it
-    metadata = _debugGetMetaData(calls+1)
+        #* First see if we're being called as a decorator
+        if callable(var) and _debugBeingUsedAsDecorator('debug', metadata):
+            def wrap(*args, **kwargs):
+                # +1 call because we don't want to get this line, but the one before it
+                metadata = _debugGetMetaData(2)
 
-    #* First see if we're being called as a decorator
-    if callable(var) and 'def ' in metadata.code_context[0] and 'debug' not in metadata.code_context[0]:
-        def wrap(*args, **kwargs):
-            # +1 call because we don't want to get this line, but the one before it
-            metadata = _debugGetMetaData(2)
+                _printDebugCount()
 
-            _printDebugCount()
-
-            if stackTrace:
-                with coloredOutput(STACK_TRACE_COLOR):
-                    _debugPrintStackTrace(2, True, showFunc, showFile, showPath)
+                if stackTrace:
+                    with coloredOutput(STACK_TRACE_COLOR):
+                        _debugPrintStackTrace(2, True, showFunc, showFile, showPath)
 
 
-            with coloredOutput(NOTE_CALL_COLOR):
+                with coloredOutput(NOTE_CALL_COLOR):
+                    print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
+                    print(f'{var.__name__}() called!')
+
+                return var(*args, **kwargs)
+
+            return wrap
+
+        _printDebugCount()
+
+        if stackTrace:
+            with coloredOutput(STACK_TRACE_COLOR):
+                _debugPrintStackTrace(calls+1, True, showFunc, showFile, showPath)
+
+        #* Only print the "HERE! HERE!" message
+        if var is _None:
+            with coloredOutput(useColor if color is not _None else EMPTY_COLOR, not background):
                 print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
-                print(f'{var.__name__}() called!')
-
-            return var(*args, **kwargs)
-
-        return wrap
-
-    _printDebugCount()
-
-    if stackTrace:
-        with coloredOutput(STACK_TRACE_COLOR):
-            _debugPrintStackTrace(calls+1, True, showFunc, showFile, showPath)
-
-    #* Only print the "HERE! HERE!" message
-    if var is _None:
-        with coloredOutput(useColor if color is not None else EMPTY_COLOR, not background):
-            print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
-            print(f'{metadata.function}() called HERE!')
-        return
-
-    #* Print the standard line
-    with coloredOutput(useColor, not background):
-        print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
-
-        #* Seperate the variables into a tuple of (typeStr, varString)
-        varType = _debugGetTypename(var)
-        if useRepr:
-            varVal = repr(var)
-        else:
-            if type(var) in (tuple, list, set, dict):
-                varVal  = _debugGetListStr(var, limitToLine, minItems, maxItems, color=color)
-            else:
-                varVal  = str(var)
-
-        #* Actually get the name
-        varName = _debugGetVarName(var, calls=calls) if name is None else name
-        # It's a string literal
-        if varName is None:
-            print(var)
+                if not metadata.function.startswith('<'):
+                    print(f'{metadata.function}() called ', end='')
+                print('HERE!')
             return
 
-        print(f'{varType} {varName} = {varVal}')
+        #* Print the standard line
+        with coloredOutput(useColor, not background):
+            print(_debugGetContext(metadata, True,
+                                   showFunc or DISPLAY_FUNC,
+                                   showFile or DISPLAY_FILE,
+                                   showPath or DISPLAY_PATH), end='')
+
+            #* Seperate the variables into a tuple of (typeStr, varString)
+            varType = _debugGetTypename(var)
+            if useRepr:
+                varVal = repr(var)
+            else:
+                if type(var) in (tuple, list, set, dict):
+                    varVal  = _debugGetListStr(var, limitToLine, minItems, maxItems)
+                else:
+                    varVal  = str(var)
+
+            #* Actually get the name
+            varName = _debugGetVarName(var, calls=calls, metadata=metadata) if name is None else name
+            # It's a string literal
+            if varName is None:
+                print(var)
+                return
+
+            print(f'{varType} {varName} = {varVal}')
+    except Exception as err:
+        print('Debug had an interal error')
+        if VERBOSE or throwError:
+            raise err
 
     if isinstance(var, Exception) and throwError:
         raise var
@@ -483,17 +520,53 @@ def debug(var=_None,                # The variable to debug
     return var
 
 
-def todo(featureName, link=True):
+def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=True, showPath=False):
     """ Leave reminders for yourself to finish parts of your code.
-        Can be manually turned on or off with hideAllTodos(bool)
+        Can be manually turned on or off with hideAllTodos(bool).
+        Can also be used as a decorator (function, or class) to print a reminder
+        and also throw a NotImplemented error on being called/constructed.
     """
-    if not HIDE_TODO:
-        _printDebugCount()
-        # print(f'{featureName} hasn\'t been implemented yet!')
-        with coloredOutput(TODO_COLOR):
-            print(f'TODO: {featureName}')
-            if link or FORCE_TODO_LINK:
-                _debugGetLink(calls=1)
+    metadata = _debugGetMetaData(2)
+    situation = _debugBeingUsedAsDecorator('todo', metadata)
+    # def decorator(*decoratorArgs, **decoratorKwArgs):
+    #     def wrap(func):
+    #         def innerWrap(*funcArgs, **funcKwArgs):
+    #             return func(*funcArgs, **funcKwArgs)
+    #         return innerWrap
+    #     return wrap
+
+    def printTodo(disableFunc):
+        if not HIDE_TODO and enabled:
+            _printDebugCount()
+            with coloredOutput(TODO_COLOR):
+                print(_debugGetContext(metadata, True,
+                                      (showFunc or DISPLAY_FUNC) and not disableFunc,
+                                       showFile or DISPLAY_FILE,
+                                       showPath or DISPLAY_PATH), end='')
+                # This is coincidental, but it works
+                print(f'TODO: {featureName.__name__ if disableFunc else featureName}')
+
+    # Being used as a function decorator
+    if situation == 1:
+        def wrap(func):
+            def innerWrap(*funcArgs, **funcKwArgs):
+                printTodo(True)
+                if blocking:
+                    raise NotImplementedError()
+                return featureName(*funcArgs, **funcKwArgs)
+            return innerWrap
+        return wrap
+
+    elif situation == 2:
+        def wrap(clas):
+            def raiseErr(*_, **kw_):
+                raise NotImplementedError()
+            printTodo(True)
+            if blocking:
+                featureName.__init__ = raiseErr
+        return featureName
+    else:
+        printTodo(False)
 
 
 def reprise(obj, *args, **kwargs):
@@ -668,7 +741,7 @@ class getTime:
         print(self.name, ' ' * (15 - len(self.name)), 'took', f'{elapsed_time:.{self.accuracy}f}', '\ttime to run.')
 
 
-#! This doesn't work... yet
+# @todo
 class LoopingList(list):
     """ It's a list, that, get this, loops!
     """
@@ -779,6 +852,7 @@ def darken(rgb, amount):
     """ Returns the given color, but darkened. Make amount negative to lighten """
     return tuple([constrain(i+amount, 0, 255) for i in rgb])
 
+
 def lighten(rgb, amount):
     """ Returns the given color, but darkened. Make amount negative to darken """
     return tuple([constrain(i-amount, 0, 255) for i in rgb])
@@ -798,8 +872,6 @@ def getIndexWith(obj, key):
         if key(i):
             return cnt
     return None
-
-
 
 
 '''
@@ -859,10 +931,12 @@ def getDist(ax, ay, bx, by):
 def deg2rad(a):
     return a * math.PI / 180.0
 
+
 def normalize2rad(a):
     while a < 0: a += math.tau
     while a >= math.tau: a -= math.tau
     return a
+
 
 def normalize2deg(a):
     while a < 0: a += 360
@@ -878,7 +952,7 @@ def normalize2deg(a):
 # import tkinter.ttk as ttk
 # from contextlib import redirect_stdout
 # import ttkthemes
-
+# I don't remember what this does and I'm scared to delete it
 def stylenameElementOptions(stylename):
     '''Function to expose the options of every element associated to a widget
        stylename.'''
@@ -920,13 +994,6 @@ def stylenameElementOptions(stylename):
 
 
 
-#* Pygame
-
-
-
-
-
-
 '''
 from Point import *
 import os, math
@@ -941,12 +1008,8 @@ class Pointer:
     def get(self):
 
 
-
 def loadAsset(dir, name, extension='png'):
     return loadImage(dir + name + '.' + extension)
-
-
-
 
 
 def getGroundPoints(groundPoints):
@@ -955,7 +1018,6 @@ def getGroundPoints(groundPoints):
         returnMe += getPointsAlongLine(groundPoints[i], groundPoints[i + 1])
 
     return returnMe
-
 
 
 def portableFilename(filename):
@@ -993,9 +1055,29 @@ def rotateSurface(surface, angle, pivot, offset):
     # Add the offset vector to the center/pivot point to shift the rect.
     rect = rotated_image.get_rect(center=pivot+rotated_offset)
     return rotated_image, rect  # Return the rotated image and shifted rect.
-
-
 '''
+
+
+"""
+DECORATOR SYNTAX:
+
+def decorator(*decoratorArgs, **decoratorKwArgs):
+    def wrap(functionBeingDecorated):
+        def innerWrap(*decoratedArgs, **decoratedKwArgs):
+            return functionBeingDecorated(*decoratedArgs, **decoratedKwArgs)
+        return innerWrap
+    return wrap
+
+COPY version:
+
+def decorator(*decoratorArgs, **decoratorKwArgs):
+    def wrap(func):
+        def innerWrap(*funcArgs, **funcKwArgs):
+            return func(*funcArgs, **funcKwArgs)
+        return innerWrap
+    return wrap
+"""
+
 
 #* TESTING
 
@@ -1022,7 +1104,7 @@ if False:
     pass
 
 #* debug tests
-if False:
+if True:
     # setVerbose(True)
     a = 6
     s = 'test'
@@ -1047,14 +1129,102 @@ if False:
     debug(parseColorParams((5, 5, 5)) )
 
     debug(SyntaxError('Not an error'))
-    debug(SyntaxError('Not an error'), raiseError=True)
+    try:
+        debug(SyntaxError('Not an error'), raiseError=True)
+    except SyntaxError:
+        print('SyntaxError debug test passed!')
+    else:
+        print('SyntaxError debug test failed.')
+
     debug(UserWarning('Not a warning'))
-    debug(UserWarning('Not a warning'), raiseError=True)
+    try:
+        debug(UserWarning('Not a warning'), raiseError=True)
+    except UserWarning:
+        print('UserWarning debug test passed!')
+    else:
+        print('UserWarning debug test failed.')
 
     @debug
     def testFunc2():
         print('testFunc2 (decorator test) called')
 
+    debug()
+
     testFunc2()
 
     debug(None)
+
+    TUPLE = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+    LIST  = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    DICT  = {'a':1, 'b':2, 'c': 3}
+    TYPE_LIST = ['a', 2, 7.4, 3]
+    TYPE_TUPLE = ('a', 2, 7.4, 3)
+
+    debug([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], raiseError=True)
+    debug((0, 1, 2, 3, 4, 5, 6, 7, 8, 9), raiseError=True)
+    debug({'a':1, 'b':2, 'c': 3}, raiseError=True)
+    debug(['a', 2, 7.4, 3], raiseError=True)
+    debug(('a', 2, 7.4, 3), raiseError=True)
+    debug()
+    debug(TUPLE, raiseError=True)
+    debug(LIST, raiseError=True)
+    debug(DICT, raiseError=True)
+    debug(TYPE_LIST, raiseError=True)
+    debug(TYPE_TUPLE, raiseError=True)
+
+
+#* todo tests
+if False:
+    todo('testing todo')
+    todo('testing todo 2', False)
+
+    @todo
+    def unfinishedFunc():
+        print("this func is unfin")
+
+    try:
+        unfinishedFunc()
+    except NotImplementedError:
+        print("func decorator test worked!")
+    else:
+        print("func decorator test failed.")
+
+    @todo(blocking=False)
+    def unfinishedFunc2():
+        print("this non Blocking func is unfin")
+
+    unfinishedFunc2()
+
+    @todo
+    class unfinishedClass:
+        def __init__(self):
+            print('this class is unfin')
+
+    try:
+        x = unfinishedClass()
+    except NotImplementedError:
+        print("class decorator test worked!")
+    else:
+        print("class decorator test failed.")
+
+#* Decorator Testing
+if False:
+    def decorator(*decoratorArgs, **decoratorKwArgs):
+        def wrap(functionBeingDecorated):
+            def innerWrap(*decoratedArgs, **decoratedKwArgs):
+                debug(decoratorArgs)
+                debug(decoratorKwArgs)
+                debug(functionBeingDecorated)
+                debug(decoratedArgs)
+                debug(decoratedKwArgs)
+                return functionBeingDecorated(*decoratedArgs, **decoratedKwArgs)
+            return innerWrap
+        return wrap
+
+    @decorator("decoratorArg1", "decoratorArg2", decoratorKwArg="decoratorKwValue")
+    def testFunc(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+        debug(funcArg1)
+        debug(funcArg2)
+        debug(funcKwArg)
+
+    testFunc("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
