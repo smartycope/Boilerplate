@@ -56,12 +56,22 @@ EMPTY_COLOR =         NOTE_CALL_COLOR
 CONTEXT_COLOR =       None
 COUNT_COLOR =         (34, 111, 157)
 DEFAULT_DEBUG_COLOR = (34, 179, 99)
-TODO_COLOR            = (128, 64, 64)
-STACK_TRACE_COLOR     = (159, 148, 211)
+TODO_COLOR          = (128, 64, 64)
+STACK_TRACE_COLOR   = (159, 148, 211)
+CONFIDENCE_WARNING_COLOR = (255, 190, 70)
+# CONFIDENCE_WARNING_COLOR = WARN_COLOR
+
+DEBUG_METADATA_DARKEN = 60
+DEBUG_TYPE_DARKEN     = 20
+DEBUG_NAME_DARKEN     = -30
+DEBUG_EQUALS_COLOR    = DEFAULT_COLOR
+DEBUG_VALUE_DARKEN    = 0
 
 #* Convenience commonly used paths. ROOT can be set by the setRoot() function
 DIR  = dirname(__file__)
 ROOT = dirname(DIR) if basename(DIR) in ('src', 'source') else DIR
+
+MAX_INT_SIZE = 2147483645
 
 VERBOSE = False
 
@@ -107,6 +117,7 @@ def deref(ptr):
     return ptr.contents.value
 
 
+#* Color Stuff
 def resetColor():
     print('\033[0m',  end='')
     print('\033[39m', end='')
@@ -114,7 +125,7 @@ def resetColor():
     # print('', end='')
 
 
-def parseColorParams(r, g=None, b=None, a=None, bg=False) -> "((r, g, b), background)":
+def parseColorParams(r, g=None, b=None, a=None, bg=False) -> "((r, g, b, a), background)":
     """ Parses given color parameters and returns a tuple of equalized
         3-4 item tuple of color data, and a bool for background.
         Can take 3-4 tuple/list of color data, or r, g, and b as induvidual parameters,
@@ -183,7 +194,22 @@ class coloredOutput:
         print(f'\033[38;2;{self.doneColor[0]};{self.doneColor[1]};{self.doneColor[2]}m', end='')
 
 
-#* These are all helper functions for debug
+def rgbToHex(rgb):
+    """ Translates an rgb tuple of int to a tkinter friendly color code """
+    return f'#{int(rgb[0]):02x}{int(rgb[1]):02x}{int(rgb[2]):02x}'
+
+
+def darken(amount, r, g=None, b=None, a=None):
+    """ Returns the given color, but darkened. Make amount negative to lighten """
+    return tuple([constrain(i - amount, 0, 255) for i in parseColorParams(r, g, b, a)[0]])
+
+
+def lighten(amount, r, g=None, b=None, a=None):
+    """ Returns the given color, but darkened. Make amount negative to darken """
+    return tuple([constrain(i + amount, 0, 255) for i in parseColorParams(r, g, b, a)[0]])
+
+
+#* Debug Helper Functions
 def _debugGetMetaData(calls=1):
     """ Gets the meta data of the line you're calling this function from.
         Calls is for how many function calls to look back from.
@@ -307,7 +333,7 @@ def _debugGetVarName(var, full=True, calls=1, metadata=None):
     try:
         return argname('var', frame=calls+1)
     # It's a *likely* string literal
-    except ImproperUseError as e:
+    except Exception as e:
         if type(var) is str:
             return None
         else:
@@ -373,6 +399,14 @@ def _debugBeingUsedAsDecorator(funcName, metadata=None, calls=1):
 
     return False
 
+def printContext(calls=1, color=CONTEXT_COLOR, showFunc=True, showFile=True, showPath=True):
+    _printDebugCount()
+    with coloredOutput(color):
+        print(_debugGetContext(_debugGetMetaData(1 + calls), True,
+                               showFunc or DISPLAY_FUNC,
+                               showFile or DISPLAY_FILE,
+                               showPath or DISPLAY_PATH), end='')
+
 # A unique dummy class for the var parameter
 class _None: pass
 
@@ -389,8 +423,8 @@ def debug(var=_None,                # The variable to debug
           calls: int=1,             # Add extra calls
           background: bool=False,   # Whether the color parameter applies to the forground or the background
           limitToLine: bool=True,   # When printing iterables, whether we should only print items to the end of the line
-          minItems: int=4,          # Minimum number of items to print when printing iterables (overrides limitToLine)
-          maxItems: int=10,         # Maximum number of items to print when printing iterables, use None or negative to specify no limit
+          minItems: int=50,         # Minimum number of items to print when printing iterables (overrides limitToLine)
+          maxItems: int=-1,         # Maximum number of items to print when printing iterables, use None or negative to specify no limit
           stackTrace: bool=False,   # Print a stack trace
           raiseError: bool=False,   # If var is an error type, raise it
           clr=_None,                # Alias of color
@@ -428,90 +462,98 @@ def debug(var=_None,                # The variable to debug
             trace: Alias of stackTrace
             bg: Alias of background
     """
-    # Add a try statement here to make sure we don't throw an internal error when in use
-    try:
-        stackTrace = stackTrace or trace
-        useRepr = useRepr or _repr
-        background = background or bg
-        throwError = throw or throwError or raiseError
-        useColor = (DEFAULT_DEBUG_COLOR if clr is _None else clr) if color is _None else color
+    stackTrace = stackTrace or trace
+    useRepr = useRepr or _repr
+    background = background or bg
+    throwError = throw or throwError or raiseError
+    useColor = (DEFAULT_DEBUG_COLOR if clr is _None else clr) if color is _None else color
 
-        if maxItems < 0 or maxItems is None:
-            maxItems = 1000000
+    if maxItems < 0 or maxItems is None:
+        maxItems = 1000000
 
-        if isinstance(var, Warning):
-            useColor = WARN_COLOR
-        elif isinstance(var, Exception):
-            useColor = ALERT_COLOR
+    if isinstance(var, Warning):
+        useColor = WARN_COLOR
+    elif isinstance(var, Exception):
+        useColor = ALERT_COLOR
 
-        # +1 call because we don't want to get this line, but the one before it
-        metadata = _debugGetMetaData(calls+1)
+    # +1 call because we don't want to get this line, but the one before it
+    metadata = _debugGetMetaData(calls+1)
 
-        #* First see if we're being called as a decorator
-        if callable(var) and _debugBeingUsedAsDecorator('debug', metadata):
-            def wrap(*args, **kwargs):
-                # +1 call because we don't want to get this line, but the one before it
-                metadata = _debugGetMetaData(2)
+    #* First see if we're being called as a decorator
+    if callable(var) and _debugBeingUsedAsDecorator('debug', metadata):
+        def wrap(*args, **kwargs):
+            # +1 call because we don't want to get this line, but the one before it
+            metadata = _debugGetMetaData(2)
 
-                _printDebugCount()
+            _printDebugCount()
 
-                if stackTrace:
-                    with coloredOutput(STACK_TRACE_COLOR):
-                        _debugPrintStackTrace(2, True, showFunc, showFile, showPath)
+            if stackTrace:
+                with coloredOutput(STACK_TRACE_COLOR):
+                    _debugPrintStackTrace(2, True, showFunc, showFile, showPath)
 
 
-                with coloredOutput(NOTE_CALL_COLOR):
-                    print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
-                    print(f'{var.__name__}() called!')
-
-                return var(*args, **kwargs)
-
-            return wrap
-
-        _printDebugCount()
-
-        if stackTrace:
-            with coloredOutput(STACK_TRACE_COLOR):
-                _debugPrintStackTrace(calls+1, True, showFunc, showFile, showPath)
-
-        #* Only print the "HERE! HERE!" message
-        if var is _None:
-            with coloredOutput(useColor if color is not _None else EMPTY_COLOR, not background):
+            with coloredOutput(NOTE_CALL_COLOR):
                 print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
-                if not metadata.function.startswith('<'):
-                    print(f'{metadata.function}() called ', end='')
-                print('HERE!')
+                print(f'{var.__name__}() called!')
+
+            return var(*args, **kwargs)
+
+        return wrap
+
+    _printDebugCount()
+
+    if stackTrace:
+        with coloredOutput(STACK_TRACE_COLOR):
+            _debugPrintStackTrace(calls+1, True, showFunc, showFile, showPath)
+
+    #* Only print the "HERE! HERE!" message
+    if var is _None:
+        with coloredOutput(useColor if color is not _None else EMPTY_COLOR, not background):
+            print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
+            if not metadata.function.startswith('<'):
+                print(f'{metadata.function}() called ', end='')
+            print('HERE!')
+        return
+
+
+    metadataColor = darken(DEBUG_METADATA_DARKEN,  useColor)
+    typeColor     = darken(DEBUG_TYPE_DARKEN,  useColor)
+    nameColor     = darken(DEBUG_NAME_DARKEN, useColor)
+    equalsColor   = DEBUG_EQUALS_COLOR
+    valueColor    = darken(DEBUG_VALUE_DARKEN, useColor)
+    #* Print the standard line
+    with coloredOutput(metadataColor, not background):
+        print(_debugGetContext(metadata, True,
+                                showFunc or DISPLAY_FUNC,
+                                showFile or DISPLAY_FILE,
+                                showPath or DISPLAY_PATH), end='')
+
+    #* Seperate the variables into a tuple of (typeStr, varString)
+    varType = _debugGetTypename(var)
+    if useRepr:
+        varVal = repr(var)
+    else:
+        if type(var) in (tuple, list, set, dict):
+            varVal  = _debugGetListStr(var, limitToLine, minItems, maxItems)
+        else:
+            varVal  = str(var)
+
+    with coloredOutput(nameColor, not background):
+        #* Actually get the name
+        varName = _debugGetVarName(var, calls=calls, metadata=metadata) if name is None else name
+        # It's a string literal
+        if varName is None:
+            print(var)
             return
 
-        #* Print the standard line
-        with coloredOutput(useColor, not background):
-            print(_debugGetContext(metadata, True,
-                                   showFunc or DISPLAY_FUNC,
-                                   showFile or DISPLAY_FILE,
-                                   showPath or DISPLAY_PATH), end='')
-
-            #* Seperate the variables into a tuple of (typeStr, varString)
-            varType = _debugGetTypename(var)
-            if useRepr:
-                varVal = repr(var)
-            else:
-                if type(var) in (tuple, list, set, dict):
-                    varVal  = _debugGetListStr(var, limitToLine, minItems, maxItems)
-                else:
-                    varVal  = str(var)
-
-            #* Actually get the name
-            varName = _debugGetVarName(var, calls=calls, metadata=metadata) if name is None else name
-            # It's a string literal
-            if varName is None:
-                print(var)
-                return
-
-            print(f'{varType} {varName} = {varVal}')
-    except Exception as err:
-        print('Debug had an interal error')
-        if VERBOSE or throwError:
-            raise err
+    with coloredOutput(typeColor, not background):
+        print(varType, end=' ')
+    with coloredOutput(nameColor, not background):
+        print(varName, end=' ')
+    with coloredOutput(equalsColor, not background):
+        print('=', end=' ')
+    with coloredOutput(valueColor, not background):
+        print(varVal)
 
     if isinstance(var, Exception) and throwError:
         raise var
@@ -568,6 +610,26 @@ def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=
     else:
         printTodo(False)
 
+
+def confidence(percentage):
+    def wrap(func):
+        def innerWrap(*funcArgs, **funcKwArgs):
+            if percentage > 100:
+                raise TypeError(f"You can't be {percentage}% confident, that's not how it works.")
+            elif percentage < 0:
+                raise UserWarning("You're using a function that's probably going to fail.")
+            elif percentage < 20:
+                printContext(2, darken(80, ALERT_COLOR), showFunc=False)
+                with coloredOutput(ALERT_COLOR):
+                    print(f"Warning: {func.__name__} will probably fail")
+            elif percentage < 50:
+                printContext(2, darken(80, CONFIDENCE_WARNING_COLOR), showFunc=False)
+                with coloredOutput(CONFIDENCE_WARNING_COLOR):
+                    print(f"Warning: You don't seem to be very confident in {func.__name__}")
+            return func(*funcArgs, **funcKwArgs)
+        return innerWrap
+    return wrap
+confident = confidence
 
 def reprise(obj, *args, **kwargs):
     """ Sets the __repr__ function to the __str__ function of a class.
@@ -640,6 +702,27 @@ def findClosestXPoint(target, comparatorList, offsetIndex = 0):
             finalDist = currentDist
 
     return result
+
+
+
+def findClosestValue(target, comparatorList) -> "value":
+    """ Finds the value in comparatorList that is closest to target """
+    # dist = max_distance
+    # value = None
+    # index = 0
+    # for cnt, current in enumerate(comparatorList):
+    #     currentDist = abs(target - current)
+    #     if currentDist < dist:
+    #         dist = currentDist
+    #         value = current
+    #         index = cnt
+    # return (value, index)
+    return min(comparatorList, key=lambda x: abs(target - x))
+
+
+def findFurthestValue(target, comparatorList) -> "value":
+    """ Finds the value in comparatorList that is furthest from target """
+    return max(comparatorList, key=lambda x: abs(target - x))
 
 
 def getPointsAlongLine(p1, p2):
@@ -843,26 +926,27 @@ def constrain(val, low, high):
     return min(high, max(low, val))
 
 
-def rgbToHex(rgb):
-    """ Translates an rgb tuple of int to a tkinter friendly color code """
-    return f'#{int(rgb[0]):02x}{int(rgb[1]):02x}{int(rgb[2]):02x}'
-
-
-def darken(rgb, amount):
-    """ Returns the given color, but darkened. Make amount negative to lighten """
-    return tuple([constrain(i+amount, 0, 255) for i in rgb])
-
-
-def lighten(rgb, amount):
-    """ Returns the given color, but darkened. Make amount negative to darken """
-    return tuple([constrain(i-amount, 0, 255) for i in rgb])
-
-
 def ensureIterable(obj, useList=False):
     if not isinstance(obj, Iterable):
         return [obj, ] if useList else (obj, )
     else:
         return obj
+
+
+def ensureNotIterable(obj, emptyBecomes=_None):
+    if isinstance(obj, Iterable):
+        if len(obj) == 1:
+            try:
+                return obj[0]
+            except TypeError:
+                return list(obj)[0]
+        elif len(obj) == 0:
+            return obj if emptyBecomes is _None else emptyBecomes
+        else:
+            return obj
+    else:
+        return obj
+
 
 # Returns the index of the first object in a list in which key returns true to.
 # Example: getIndexWith([ [5, 3], [2, 3], [7, 3] ], lambda x: x[0] + x[1] == 10) -> 2
@@ -942,6 +1026,33 @@ def normalize2deg(a):
     while a < 0: a += 360
     while a >= 360: a -= 360
     return a
+
+
+def invertDict(d):
+    """ Returns the dict given, but with the keys as values and the values as keys. """
+    return dict(zip(d.values(), d.keys()))
+
+
+def quickTable(listOfLists, interpretAsRows=True, fieldNames=None, returnStr=False, sortByField:str=False, sortedReverse=False):
+    """ A small wrapper for the prettytable library """
+    try:
+        from prettytable import PrettyTable
+    except ImportError:
+        print('Can\'t import prettyTable, which is nessicary for Cope.quickTable(). Try running "pip install prettyTable"')
+    else:
+        t = PrettyTable()
+        if fieldNames is not None:
+            t.field_names = fieldNames
+        if interpretAsRows:
+            t.add_rows(listOfLists)
+        else:
+            t.add_columns(listOfLists)
+        if sortByField:
+            t.sortby = sortByField
+            t.reversesort = sortedReverse
+
+        return t.get_string() if returnStr else t
+
 
 
 #* API Specific functions
@@ -1076,29 +1187,6 @@ def decorator(*decoratorArgs, **decoratorKwArgs):
             return func(*funcArgs, **funcKwArgs)
         return innerWrap
     return wrap
-"""
-
-
-
-"""
-DECORATOR SYNTAX:
-
-def decorator(*decoratorArgs, **decoratorKwArgs):
-    def wrap(functionBeingDecorated):
-        def innerWrap(*decoratedArgs, **decoratedKwArgs):
-            return functionBeingDecorated(*decoratedArgs, **decoratedKwArgs)
-        return innerWrap
-    return wrap
-
-COPY version:
-
-def decorator(*decoratorArgs, **decoratorKwArgs):
-    def wrap(func):
-        def innerWrap(*funcArgs, **funcKwArgs):
-            return func(*funcArgs, **funcKwArgs)
-        return innerWrap
-    return wrap
-
 
 """
 
@@ -1136,7 +1224,7 @@ if False:
     pass
 
 #* debug tests
-if True:
+if False:
     # setVerbose(True)
     a = 6
     s = 'test'
@@ -1204,7 +1292,6 @@ if True:
     debug(TYPE_LIST, raiseError=True)
     debug(TYPE_TUPLE, raiseError=True)
 
-
 #* todo tests
 if False:
     todo('testing todo')
@@ -1260,3 +1347,30 @@ if False:
         debug(funcKwArg)
 
     testFunc("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+
+#* Confidence Testing
+if False:
+    @confidence(29)
+    def testFunc(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+        debug(funcArg1)
+        debug(funcArg2)
+        debug(funcKwArg)
+
+    @confident(102)
+    def testFunc2(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+        debug(funcArg1)
+        debug(funcArg2)
+        debug(funcKwArg)
+
+    @confident(16)
+    def testFunc3(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+        debug(funcArg1)
+        debug(funcArg2)
+        debug(funcKwArg)
+
+    testFunc( "calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+    try:
+        testFunc2("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+    except TypeError:
+        print('testFunc2 worked')
+    testFunc3("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
