@@ -19,6 +19,7 @@ from os.path import basename, dirname, join
 from random import randint
 from time import process_time
 from typing import Any, Callable, Iterable, Optional, Union
+from enum import Enum, auto
 
 try:
     from varname import (ImproperUseError, VarnameRetrievingError, argname, nameof)
@@ -59,7 +60,7 @@ DEFAULT_DEBUG_COLOR = (34, 179, 99)
 TODO_COLOR          = (128, 64, 64)
 STACK_TRACE_COLOR   = (159, 148, 211)
 CONFIDENCE_WARNING_COLOR = (255, 190, 70)
-# CONFIDENCE_WARNING_COLOR = WARN_COLOR
+DEPRICATED_WARNING_COLOR = WARN_COLOR
 
 DEBUG_METADATA_DARKEN = 60
 DEBUG_TYPE_DARKEN     = 20
@@ -71,9 +72,24 @@ DEBUG_VALUE_DARKEN    = 0
 DIR  = dirname(__file__)
 ROOT = dirname(DIR) if basename(DIR) in ('src', 'source') else DIR
 
+# Yes, this is not strictly accurate.
 MAX_INT_SIZE = 2147483645
 
 VERBOSE = False
+
+class CommonResponses:
+    """ A collection of default responses for inputs. Make sure to use .lower() when testing agaisnt these.
+        Note: There is some overlap between them, so testing order matters.
+    """
+    YES   = ('y', 'yes', 'ya', 'yeah', 'si', 'true', 'definitely', 'accurate', 'totally')
+    NO    = ('n', 'no', 'not', 'nien', 'false', 'nope', 'not really', 'nah')
+    MAYBE = ('sure', 'kinda', 'i guess', 'kind of', 'maybe', 'ish', 'sorta')
+    NA    = ('none', 'na', 'n/a', 'not applicable')
+    HIGH_AMOUNT = ('very', 'much', 'very much', 'extremely', 'quite', 'quite a bit', 'lot', 'a lot', 'lots', 'super', 'high', 'ton', 'a ton', 'bunch', 'a bunch')
+    MODERATE_AMOUNT = ('fairly', 'somewhat', 'enough')
+    SOME_AMOUNT = ('a little bit', 'a bit', 'a little', 'ish', 'not a lot', 'not a ton', 'some', 'mostly')
+    LOW_AMOUNT  = ("not at all", 'not very', 'not much', 'not', 'low', 'none', 'none at all', 'not terribly')
+
 
 #* Setters for the gloabals
 def displayAllFiles(to=True):
@@ -611,25 +627,61 @@ def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=
         printTodo(False)
 
 
-def confidence(percentage):
+def confidence(level):
     def wrap(func):
         def innerWrap(*funcArgs, **funcKwArgs):
-            if percentage > 100:
-                raise TypeError(f"You can't be {percentage}% confident, that's not how it works.")
-            elif percentage < 0:
-                raise UserWarning("You're using a function that's probably going to fail.")
-            elif percentage < 20:
+            def definiteFail():
+                raise UserWarning(f"{func.__name__} is going to fail.")
+
+            def probablyFail():
                 printContext(2, darken(80, ALERT_COLOR), showFunc=False)
                 with coloredOutput(ALERT_COLOR):
                     print(f"Warning: {func.__name__} will probably fail")
-            elif percentage < 50:
+
+            def possiblyFail():
                 printContext(2, darken(80, CONFIDENCE_WARNING_COLOR), showFunc=False)
                 with coloredOutput(CONFIDENCE_WARNING_COLOR):
-                    print(f"Warning: You don't seem to be very confident in {func.__name__}")
+                    print(f"Warning: {func.__name__} might not work")
+
+            def unknownInput():
+                raise TypeError(f"I don't recognize {level} as a confidence level.")
+
+            if type(level) is int:
+                if level > 100:
+                    raise TypeError(f"You can't be {level}% confident, that's not how it works.")
+                elif level < 0:
+                    definiteFail()
+                elif level < 20:
+                    probablyFail()
+                elif level < 50:
+                    possiblyFail()
+            elif type(level) is str:
+                l = level.lower()
+                if l in CommonResponses.NO or l in CommonResponses.LOW_AMOUNT:
+                    probablyFail()
+                elif l in CommonResponses.MAYBE or l in CommonResponses.SOME_AMOUNT:
+                    possiblyFail()
+                elif l not in CommonResponses.YES and l not in CommonResponses.HIGH_AMOUNT and \
+                     l not in CommonResponses.NA  and l not in CommonResponses.MODERATE_AMOUNT:
+                    unknownInput()
+            else:
+                unknownInput()
+
             return func(*funcArgs, **funcKwArgs)
         return innerWrap
     return wrap
 confident = confidence
+
+
+def depricated(why=''):
+    def wrap(func):
+        def innerWrap(*funcArgs, **funcKwArgs):
+            printContext(2, darken(80, DEPRICATED_WARNING_COLOR))
+            with coloredOutput(DEPRICATED_WARNING_COLOR):
+                print(f"{func.__name__} is Depricated{': ' if len(why) else '.'}{why}")
+            return func(*funcArgs, **funcKwArgs)
+        return innerWrap
+    return wrap
 
 def reprise(obj, *args, **kwargs):
     """ Sets the __repr__ function to the __str__ function of a class.
@@ -1368,9 +1420,37 @@ if False:
         debug(funcArg2)
         debug(funcKwArg)
 
-    testFunc( "calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+    @confidence('super')
+    def testFunc4(): pass
+
+    @confidence('not very')
+    def testFunc5(): pass
+
+    @confidence('none')
+    def testFunc6(): pass
+
+    @confidence('low')
+    def testFunc7(): pass
+
+    @confidence('Sorta')
+    def testFunc8(): pass
+
+    @confidence('asfgs')
+    def testFunc9(): pass
+
     try:
         testFunc2("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
     except TypeError:
         print('testFunc2 worked')
+
+    testFunc( "calledArg1", 'calledArg2', funcKwArg='calledKwArg')
     testFunc3("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+    testFunc4()
+    testFunc5()
+    testFunc6()
+    testFunc7()
+    testFunc8()
+    try:
+        testFunc9()
+    except TypeError:
+        print('testFunc9 worked')
