@@ -9,8 +9,9 @@ __license__ = 'GPL 3.0'
 __copyright__ = '(c) 2021, Copeland Carter'
 
 
+################################### Imports ###################################
 import atexit
-import math
+from math import tau, pi as PI
 import re
 from ctypes import pointer, py_object
 from inspect import stack
@@ -20,20 +21,16 @@ from time import process_time
 from typing import Any, Callable, Iterable, Optional, Union
 from enum import Enum, auto
 
-# ENABLE_PYGAME_SPECIFIC_FEATURES       = False
-# ENABLE_TKINTER_SPECIFIC_FEATURES      = False
-# ENABLE_PRETTYTABLE_SPECIFIC_FEATURES  = True
-# ENABLE_CUSTOM_POINT_SPECIFIC_FEATURES = False
-
-try:
-    from varname import (ImproperUseError, VarnameRetrievingError, argname, nameof)
-except ImportError:
-    Warning("Can't import debug from Cope.py. Try running pip install varname.")
-    varnameImported = False
-else:
-    varnameImported = True
+# try:
+#     from varname import (ImproperUseError, VarnameRetrievingError, argname, nameof)
+# except ImportError:
+#     Warning("Can't import debug from Cope.py. Try running pip install varname.")
+#     varnameImported = False
+# else:
+#     varnameImported = True
 
 
+################################### Constants ###################################
 # This is because I write a lot of C/C++ code
 true, false = True, False
 
@@ -82,21 +79,11 @@ MAX_INT_SIZE = 2147483645
 
 VERBOSE = False
 
-class CommonResponses:
-    """ A collection of default responses for inputs. Make sure to use .lower() when testing agaisnt these.
-        Note: There is some overlap between them, so testing order matters.
-    """
-    YES   = ('y', 'yes', 'ya', 'yeah', 'si', 'true', 'definitely', 'accurate', 'totally')
-    NO    = ('n', 'no', 'not', 'nien', 'false', 'nope', 'not really', 'nah')
-    MAYBE = ('sure', 'kinda', 'i guess', 'kind of', 'maybe', 'ish', 'sorta')
-    NA    = ('none', 'na', 'n/a', 'not applicable')
-    HIGH_AMOUNT = ('very', 'much', 'very much', 'extremely', 'quite', 'quite a bit', 'lot', 'a lot', 'lots', 'super', 'high', 'ton', 'a ton', 'bunch', 'a bunch')
-    MODERATE_AMOUNT = ('fairly', 'somewhat', 'enough')
-    SOME_AMOUNT = ('a little bit', 'a bit', 'a little', 'ish', 'not a lot', 'not a ton', 'some', 'mostly')
-    LOW_AMOUNT  = ("not at all", 'not very', 'not much', 'not', 'low', 'none', 'none at all', 'not terribly')
+# A unique dummy class for parameters
+class _None: pass
 
 
-#* Setters for the gloabals
+################################### Setters for Globals ###################################
 def displayAllFiles(to=True):
     global DISPLAY_FILE
     DISPLAY_FILE = to
@@ -130,22 +117,31 @@ def verbose():
     return VERBOSE
 
 
-# This is bad practice, try to avoid using these
-def ref(obj):
-    return pointer(py_object(obj))
+################################### Enums ###################################
+class CommonResponses:
+    """ A collection of default responses for inputs. Make sure to use .lower() when testing agaisnt these.
+        Note: There is some overlap between them, so testing order matters.
+    """
+    YES   = ('y', 'yes', 'ya', 'yeah', 'si', 'true', 'definitely', 'accurate', 'totally')
+    NO    = ('n', 'no', 'not', 'nien', 'false', 'nope', 'not really', 'nah')
+    MAYBE = ('sure', 'kinda', 'i guess', 'kind of', 'maybe', 'ish', 'sorta')
+    NA    = ('none', 'na', 'n/a', 'not applicable')
+    HIGH_AMOUNT = ('very', 'much', 'very much', 'extremely', 'quite', 'quite a bit', 'lot', 'a lot', 'lots',
+                   'super', 'high', 'ton', 'a ton', 'bunch', 'a bunch')
+    MODERATE_AMOUNT = ('fairly', 'somewhat', 'enough')
+    SOME_AMOUNT = ('a little bit', 'a bit', 'a little', 'ish', 'not a lot', 'not a ton', 'some', 'mostly')
+    LOW_AMOUNT  = ("not at all", 'not very', 'not much', 'low', 'none', 'none at all', 'not terribly')
 
-def deref(ptr):
-    return ptr.contents.value
 
-
-#* Color Stuff
+################################### Color Utilites ###################################
 def resetColor():
     print('\033[0m',  end='')
     print('\033[39m', end='')
     print('\033[49m', end='')
     # print('', end='')
 
-
+#todo Add support for openGL colors (-1.0 to 1.0
+#todo Consider changing the param paradigm to *rgba instead of all seperate parameters
 def parseColorParams(r, g=None, b=None, a=None, bg=False) -> "((r, g, b, a), background)":
     """ Parses given color parameters and returns a tuple of equalized
         3-4 item tuple of color data, and a bool for background.
@@ -182,7 +178,6 @@ def parseColorParams(r, g=None, b=None, a=None, bg=False) -> "((r, g, b, a), bac
     else:
         raise SyntaxError(f'Incorrect color parameters {tuple(type(i) for i in (r, g, b, a, bg))} given')
 
-
 class coloredOutput:
     """ A class to be used with the 'with' command to print colors.
         Resets after it's done.
@@ -214,23 +209,77 @@ class coloredOutput:
     def reset(self):
         print(f'\033[38;2;{self.doneColor[0]};{self.doneColor[1]};{self.doneColor[2]}m', end='')
 
-
 def rgbToHex(rgb):
     """ Translates an rgb tuple of int to a tkinter friendly color code """
     return f'#{int(rgb[0]):02x}{int(rgb[1]):02x}{int(rgb[2]):02x}'
 
-
 def darken(amount, r, g=None, b=None, a=None):
     """ Returns the given color, but darkened. Make amount negative to lighten """
-    return tuple([constrain(i - amount, 0, 255) for i in parseColorParams(r, g, b, a)[0]])
-
+    # Constrain isn't defined yet and I don't feel like moving it
+    return tuple([min(255, max(0, i - amount)) for i in parseColorParams(r, g, b, a)[0]])
 
 def lighten(amount, r, g=None, b=None, a=None):
     """ Returns the given color, but darkened. Make amount negative to darken """
     return tuple([constrain(i + amount, 0, 255) for i in parseColorParams(r, g, b, a)[0]])
 
+def clampColor(r, g=None, b=None, a=None):
+    """ Clamp a 0-255 color to a float between 1 and 0.
+        Helpful for openGL commands.
+    """
+    rgba = parseColorParams(r, g, b, a)[0]
+    return tuple(c / 255 for c in rgba)
 
-#* Debug Helper Functions
+def invertColor(r, g=None, b=None, a=None):
+    """ Inverts a color """
+    rgba = parseColorParams(r, g, b, a)[0]
+    return tuple(255 - c for c in rgba[0])
+
+################################### Import Utilities ###################################
+def checkImport(package:str, specificModules=[], _as=None,
+                fatal:bool=False, printWarning:Union[str, bool]=True,
+                _globals=globals(), _locals=locals(), level=0
+                ) -> "(Union[package, (packages,)], worked)":
+    if type(specificModules) is str:
+        specificModules = [specificModules]
+    try:
+        _temp = __import__(package, _globals, _locals, specificModules, level)
+    except ImportError:
+        if type(printWarning) is str:
+            print(printWarning)
+        elif printWarning:
+            if len(specificModules):
+                print(f'Can\'t import {tuple(specificModules)} from {package}. Have you installed the associated pip package?')
+            else:
+                print(f'Can\'t import {package}. Have you installed the associated pip package?')
+        if fatal:
+            raise ImportError(package)
+        return False
+    else:
+        if len(specificModules):
+            for i in specificModules[:-1]:
+                globals()[i] = _temp.__getattribute__(i)
+            globals()[_as if _as else specificModules[-1]] = _temp.__getattribute__(specificModules[-1])
+        else:
+            globals()[_as if _as else package] = _temp
+        return True
+
+def dependsOnPackage(package:str, specificModules=[], _as=None,
+                fatal:bool=True, printWarning:Union[str, bool]=True,
+                _globals=globals(), _locals=locals(), level=0):
+    def wrap(func):
+        def innerWrap(*funcArgs, **funcKwArgs):
+            if checkImport(package, specificModules, _as, fatal,
+                           printWarning, globals, locals, level):
+                return func(*funcArgs, **funcKwArgs)
+            else:
+                return None
+        return innerWrap
+    return wrap
+
+
+################################### Debug ###################################
+varnameImported = checkImport('varname', ('ImproperUseError', 'VarnameRetrievingError', 'argname', 'nameof'), fatal=False)
+
 def _debugGetMetaData(calls=1):
     """ Gets the meta data of the line you're calling this function from.
         Calls is for how many function calls to look back from.
@@ -249,7 +298,8 @@ def _debugGetLink(calls=0, full=False, customMetaData=None):
 
     _printLink(d.filename, d.lineno, d.function if full else None)
 
-# TODO This doesn't quite work properly
+#todo This doesn't work right
+#todo somehow round any float to a given length, including those printed in iterables
 def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, minItems: int=2, maxItems: int=10) -> str:
     """ "Cast" a tuple, list, set or dict to a string, automatically shorten
         it if it's long, and display how long it is.
@@ -407,16 +457,23 @@ def _debugPrintStackTrace(calls, useVscodeStyle, showFunc, showFile, showPath):
     for i in reversed(stack()[3:]):
         print('\t', _debugGetContext(i, useVscodeStyle, showFunc, showFile, showPath))
 
-def _debugBeingUsedAsDecorator(funcName, metadata=None, calls=1):
-    """ Return 1 if being used as a function decorator, 2 if as a class decorator, and 0 if neither. """
+def _debugBeingUsedAsDecorator(funcName, metadata=None, calls=1) -> 'Union[1, 2, 3, False]':
+    """ Return 1 if being used as a function decorator, 2 if as a class decorator, 3 if not sure, and False if neither. """
     if metadata is None:
         metadata = _debugGetMetaData(calls+1)
 
-    if funcName not in metadata.code_context[0]:
-        if 'def ' in metadata.code_context[0]:
+    # print(metadata.code_context)
+    line = metadata.code_context[0]
+
+    if funcName not in line:
+        if 'def ' in line:
             return 1
-        if 'class ' in metadata.code_context[0]:
+        elif 'class ' in line:
             return 2
+        elif '@' in line:
+            return 3
+    elif '@' in line:
+        return 3
 
     return False
 
@@ -428,12 +485,6 @@ def printContext(calls=1, color=CONTEXT_COLOR, showFunc=True, showFile=True, sho
                                showFile or DISPLAY_FILE,
                                showPath or DISPLAY_PATH), end='')
 
-# A unique dummy class for the var parameter
-class _None: pass
-
-# TODO: somehow round any float to a given length, including those printed in iterables
-# TODO make it so if the first is a variable you can't get (or just any variable), and the
-#   second is a string literal, set the string literal as the name of the first variable
 def debug(var=_None,                # The variable to debug
           name: str=None,           # Don't try to get the name, use this one instead
           color=_None,              # A number (0-5), a 3 item tuple/list, or None
@@ -583,13 +634,14 @@ def debug(var=_None,                # The variable to debug
     return var
 
 
+################################### Decorators ###################################
 def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=True, showPath=False):
     """ Leave reminders for yourself to finish parts of your code.
         Can be manually turned on or off with hideAllTodos(bool).
         Can also be used as a decorator (function, or class) to print a reminder
         and also throw a NotImplemented error on being called/constructed.
     """
-    metadata = _debugGetMetaData(2)
+    metadata  = _debugGetMetaData(2)
     situation = _debugBeingUsedAsDecorator('todo', metadata)
     # def decorator(*decoratorArgs, **decoratorKwArgs):
     #     def wrap(func):
@@ -609,8 +661,8 @@ def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=
                 # This is coincidental, but it works
                 print(f'TODO: {featureName.__name__ if disableFunc else featureName}')
 
-    # Being used as a function decorator
-    if situation == 1:
+    # Being used as a function decorator, or we're not sure
+    if situation in (1, 3):
         def wrap(func):
             def innerWrap(*funcArgs, **funcKwArgs):
                 printTodo(True)
@@ -630,7 +682,6 @@ def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=
         return featureName
     else:
         printTodo(False)
-
 
 def confidence(level):
     def wrap(func):
@@ -677,7 +728,6 @@ def confidence(level):
     return wrap
 confident = confidence
 
-
 def depricated(why=''):
     def wrap(func):
         def innerWrap(*funcArgs, **funcKwArgs):
@@ -688,7 +738,6 @@ def depricated(why=''):
         return innerWrap
     return wrap
 
-
 def reprise(obj, *args, **kwargs):
     """ Sets the __repr__ function to the __str__ function of a class.
         Useful for custom classes with overloaded string functions
@@ -697,172 +746,76 @@ def reprise(obj, *args, **kwargs):
     return obj
 
 
-def checkImport(package:str, specificModules=[], _as=None,
-                fatal:bool=False, printWarning:Union[str, bool]=True,
-                _globals=globals(), _locals=locals(), level=0
-                ) -> "(Union[package, (packages,)], worked)":
-    if type(specificModules) is str:
-        specificModules = [specificModules]
-    try:
-        _temp = __import__(package, _globals, _locals, specificModules, level)
-    except ImportError:
-        if type(printWarning) is str:
-            print(printWarning)
-        elif printWarning:
-            if len(specificModules):
-                print(f'Can\'t import {tuple(specificModules)} from {package}. Have you installed the associated pip package?')
-            else:
-                print(f'Can\'t import {package}. Have you installed the associated pip package?')
-        if fatal:
-            raise ImportError(package)
-        return False
+################################### Iterable Utilities ###################################
+def isiterable(obj):
+    return isinstance(obj, Iterable)
+
+def ensureIterable(obj, useList=False):
+    if not isinstance(obj, Iterable):
+        return [obj, ] if useList else (obj, )
     else:
-        if len(specificModules):
-            for i in specificModules[:-1]:
-                globals()[i] = _temp.__getattribute__(i)
-            globals()[_as if _as else specificModules[-1]] = _temp.__getattribute__(specificModules[-1])
+        return obj
+
+def ensureNotIterable(obj, emptyBecomes=_None):
+    if isinstance(obj, Iterable):
+        if len(obj) == 1:
+            try:
+                return obj[0]
+            except TypeError:
+                return list(obj)[0]
+        elif len(obj) == 0:
+            return obj if emptyBecomes is _None else emptyBecomes
         else:
-            globals()[_as if _as else package] = _temp
-        return True
+            return obj
+    else:
+        return obj
 
+def flattenList(iterable, recursive=False, useList=True):
+    if recursive:
+        raise NotImplementedError
 
-def dependsOnPackage(package:str, specificModules=[], _as=None,
-                fatal:bool=True, printWarning:Union[str, bool]=True,
-                _globals=globals(), _locals=locals(), level=0):
-    def wrap(func):
-        def innerWrap(*funcArgs, **funcKwArgs):
-            if checkImport(package, specificModules, _as, fatal,
-                           printWarning, globals, locals, level):
-                return func(*funcArgs, **funcKwArgs)
-            else:
-                return None
-        return innerWrap
-    return wrap
+    useType = list if useList else type(iterable)
+    rtn = useType()
+    for i in iterable:
+        rtn += useType(i)
+    return rtn
+    # print(flattenList(('a', 'b', [1, 2, 3]), useList=False))
 
+def removeDuplicates(iterable):
+    return type(iterable)(set(iterable))
 
-# TODO Make this use piping and return the command output
-def runCmd(args):
-    """ Run a command and terminate if it fails. """
+def normalizeList(iterable, ensureList=False):
+    if ensureList:
+        return removeDuplicates(flattenList(ensureIterable(list(iterable), True)))
+    else:
+        return ensureNotIterable(removeDuplicates(flattenList(ensureIterable(list(iterable), True))))
 
-    try:
-        ec = subprocess.call(' '.join(args), shell=True)
-    except OSError as e:
-        print("Execution failed:", e, file=sys.stderr)
-        ec = 1
-
-    if ec:
-        sys.exit(ec)
-
-
-def percent(percentage):
-    ''' Usage:
-        if (percent(50)):
-            <code that has a 50% chance of running>
-    '''
-    return randint(1, 100) < percentage
-
-
-def randbool():
-    """ Returns, randomly, either True or False """
-    return bool(randint(0, 1))
-
-
-def closeEnough(a, b, tolerance):
-    """ Returns True if a is within tolerance range of b """
-    return a <= b + tolerance and a >= b - tolerance
-
-
-def findClosestPoint(target, comparatorList):
-    """ Finds the closest point in the list to what it's given"""
-    finalDist = 1000000
-
-    for i in comparatorList:
-        current = getDist(target, i)
-        if current < finalDist:
-            finalDist = current
-
-    return finalDist
-
-
-def findClosestXPoint(target, comparatorList, offsetIndex = 0):
-    """ I've forgotten what *exactly* this does. I think it finds the point in a list of
-        points who's x point is closest to the target
+def getIndexWith(obj, key):
+    """ Returns the index of the first object in a list in which key returns true to.
+    Example: getIndexWith([ [5, 3], [2, 3], [7, 3] ], lambda x: x[0] + x[1] == 10) -> 2
+    If none are found, returns None
     """
-    finalDist = 1000000
-    result = 0
+    for cnt, i in enumerate(obj):
+        if key(i):
+            return cnt
+    return None
 
-    # for i in range(len(comparatorList) - offsetIndex):
-    for current in comparatorList:
-        # current = comparatorList[i + offsetIndex]
-        currentDist = abs(target.x - current.x)
-        if currentDist < finalDist:
-            result = current
-            finalDist = currentDist
+def invertDict(d):
+    """ Returns the dict given, but with the keys as values and the values as keys. """
+    return dict(zip(d.values(), d.keys()))
 
-    return result
-
-
-
-def findClosestValue(target, comparatorList) -> "value":
-    """ Finds the value in comparatorList that is closest to target """
-    # dist = max_distance
-    # value = None
-    # index = 0
-    # for cnt, current in enumerate(comparatorList):
-    #     currentDist = abs(target - current)
-    #     if currentDist < dist:
-    #         dist = currentDist
-    #         value = current
-    #         index = cnt
-    # return (value, index)
-    return min(comparatorList, key=lambda x: abs(target - x))
+@todo
+class LoopingList(list):
+    """ It's a list, that, get this, loops!
+    """
+    def __getitem__(self, index):
+        if index > self.__len__():
+            return super().__getitem__(index % self.__len__())
+        else:
+            return super().__getitem__(index)
 
 
-def findFurthestValue(target, comparatorList) -> "value":
-    """ Finds the value in comparatorList that is furthest from target """
-    return max(comparatorList, key=lambda x: abs(target - x))
-
-
-def getPointsAlongLine(p1, p2):
-    """ I don't remember what this does. """
-    p1 = Pointi(p1)
-    p2 = Pointi(p2)
-
-    returnMe = []
-
-    dx = p2.x - p1.x
-    dy = p2.y - p1.y
-
-    for x in range(p1.x, p2.x):
-        y = p1.y + dy * (x - p1.x) / dx
-        returnMe.append(Pointf(x, y))
-
-    return returnMe
-
-
-def rotatePoint(p, angle, pivotPoint, radians = False):
-    """ This rotates one point around another point a certain amount, and returns it's new position """
-    if not radians:
-        angle = math.radians(angle)
-    # p -= pivotPoint
-    # tmp = pygame.math.Vector2(p.data()).normalize().rotate(amount)
-    # return Pointf(tmp.x, tmp.y) + pivotPoint
-
-    dx = p.x - pivotPoint.x
-    dy = p.y - pivotPoint.y
-    newX = dx * math.cos(angle) - dy * math.sin(angle) + pivotPoint.x
-    newY = dx * math.sin(angle) + dy * math.cos(angle) + pivotPoint.y
-
-    return Pointf(newX, newY)
-
-
-def getMidPoint(p1, p2):
-    """ Returns the halfway point between 2 given points """
-    assert type(p1) == type(p2)
-    # return Pointf((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
-    return p1._initCopy((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
-
-
+################################### Timing Utilities ###################################
 timingData = {}
 def timeFunc(func, accuracy=5):
     """ A function decorator that prints how long it takes for a function to run """
@@ -890,7 +843,6 @@ def timeFunc(func, accuracy=5):
         return returns
     return wrap
 
-
 def _printTimingData(accuracy=5):
     """ I realized *after* I wrote this that this is a essentially profiler. Oops. """
     global timingData
@@ -902,7 +854,6 @@ def _printTimingData(accuracy=5):
         for name, times in reversed(sorted(timingData.items(), key=lambda x: sum(x[1]))):
             print(f'{name:<{maxName}} was called {len(times):<{maxNum}} times taking {sum(times)/len(times):.{accuracy}f} seconds on average for a total of {sum(times):.{accuracy}f} seconds.')
 atexit.register(_printTimingData)
-
 
 class getTime:
     """ A class to use with a with statement like so:
@@ -924,17 +875,7 @@ class getTime:
         print(self.name, ' ' * (15 - len(self.name)), 'took', f'{elapsed_time:.{self.accuracy}f}', '\ttime to run.')
 
 
-# @todo
-class LoopingList(list):
-    """ It's a list, that, get this, loops!
-    """
-    def __getitem__(self, index):
-        if index > self.__len__():
-            return super().__getitem__(index % self.__len__())
-        else:
-            return super().__getitem__(index)
-
-
+################################### Misc. Useful Classes ###################################
 class FunctionCall:
     """ A helpful class that represents an as-yet uncalled function call with parameters """
     def __init__(self, func=lambda: None, args=(), kwargs={}):
@@ -953,7 +894,6 @@ class FunctionCall:
             return self.func(*args, **kwargs)
         else:
             return self.func(*self.args, **self.kwargs)
-
 
 class Signal:
     """ A custom Signal implementation. Connect with the connect() function """
@@ -976,13 +916,57 @@ class Signal:
         # return rtns[0] if len(rtns) <= 1 else rtns
 
 
+################################### Misc. Useful Functions ###################################
+@todo('Make this use piping and return the command output', False)
+def runCmd(args):
+    """ Run a command and terminate if it fails. """
+    try:
+        ec = subprocess.call(' '.join(args), shell=True)
+    except OSError as e:
+        print("Execution failed:", e, file=sys.stderr)
+        ec = 1
+    if ec:
+        sys.exit(ec)
+
+def percent(percentage):
+    ''' Usage:
+        if (percent(50)):
+            <code that has a 50% chance of running>
+    '''
+    return randint(1, 100) < percentage
+
+def randbool():
+    """ Returns, randomly, either True or False """
+    return bool(randint(0, 1))
+
+def closeEnough(a, b, tolerance):
+    """ Returns True if a is within tolerance range of b """
+    return a <= b + tolerance and a >= b - tolerance
+
+def findClosestValue(target, comparatorList) -> "value":
+    """ Finds the value in comparatorList that is closest to target """
+    # dist = max_distance
+    # value = None
+    # index = 0
+    # for cnt, current in enumerate(comparatorList):
+    #     currentDist = abs(target - current)
+    #     if currentDist < dist:
+    #         dist = currentDist
+    #         value = current
+    #         index = cnt
+    # return (value, index)
+    return min(comparatorList, key=lambda x: abs(target - x))
+
+def findFurthestValue(target, comparatorList) -> "value":
+    """ Finds the value in comparatorList that is furthest from target """
+    return max(comparatorList, key=lambda x: abs(target - x))
+
 def absdeg(angle):
     """ If an angle (in degrees) is not within 360, then this cuts it down to within 0-360 """
     angle = angle % 360.0
     if angle < 0:
         angle += 360
     return angle
-
 
 def absrad(angle):
     """ If an angle (in radians) is not within 2Pi, then this cuts it down to within 0-2Pi """
@@ -991,172 +975,68 @@ def absrad(angle):
         angle += math.tau
     return angle
 
-
 def center(string):
     """ Centers a string for printing in the terminal """
     from os import get_terminal_size
     for _ in range(int((get_terminal_size().columns - len(string)) / 2)): string = ' ' + string
     return string
 
-
 def isPowerOf2(x):
     """ Returns true if x is a power of 2 """
     return (x != 0) and ((x & (x - 1)) == 0)
-
 
 def isBetween(val, start, end, beginInclusive=False, endInclusive=False):
     """ Returns true if val is between start and end """
     return (val >= start if beginInclusive else val > start) and \
            (val <= end   if endInclusive   else val < end)
 
-
-def collidePoint(topLeft: 'Point', size: Union[tuple, list, 'Size'], target, inclusive=True):
-    """ Returns true if target is within the rectangle given by topLeft and size """
-    return isBetween(target.x, topLeft.x, size[0], beginInclusive=inclusive, endInclusive=inclusive) and \
-           isBetween(target.y, topLeft.y, size[1], beginInclusive=inclusive, endInclusive=inclusive)
-
-
 def insertChar(string, index, char):
     """ Returns the string with char inserted into string at index. Freaking python string are immutable. """
     return string[:index] + char + string[index+1:]
-
 
 def constrain(val, low, high):
     """ Constrains val to be within low and high """
     return min(high, max(low, val))
 
-#* Iterable Functions
-def isiterable(obj):
-    return isinstance(obj, Iterable)
-
-
-def ensureIterable(obj, useList=False):
-    if not isinstance(obj, Iterable):
-        return [obj, ] if useList else (obj, )
-    else:
-        return obj
-
-
-def ensureNotIterable(obj, emptyBecomes=_None):
-    if isinstance(obj, Iterable):
-        if len(obj) == 1:
-            try:
-                return obj[0]
-            except TypeError:
-                return list(obj)[0]
-        elif len(obj) == 0:
-            return obj if emptyBecomes is _None else emptyBecomes
-        else:
-            return obj
-    else:
-        return obj
-
-
-def flattenList(iterable, recursive=False, useList=True):
-    if recursive:
-        raise NotImplementedError
-
-    useType = list if useList else type(iterable)
-    rtn = useType()
-    for i in iterable:
-        rtn += useType(i)
-    return rtn
-    # print(flattenList(('a', 'b', [1, 2, 3]), useList=False))
-
-
-def removeDuplicates(iterable):
-    return type(iterable)(set(iterable))
-
-
-def normalizeList(iterable, ensureList=False):
-    if ensureList:
-        return removeDuplicates(flattenList(ensureIterable(list(iterable), True)))
-    else:
-        return ensureNotIterable(removeDuplicates(flattenList(ensureIterable(list(iterable), True))))
-
-# Returns the index of the first object in a list in which key returns true to.
-# Example: getIndexWith([ [5, 3], [2, 3], [7, 3] ], lambda x: x[0] + x[1] == 10) -> 2
-# If none are found, returns None
-def getIndexWith(obj, key):
-    for cnt, i in enumerate(obj):
-        if key(i):
-            return cnt
-    return None
-
-
-'''
-def tlOriginToCenterOrigin(p: Point, width, height):
-    return Pointf(p.x - (width / 2), p.y - (height / 2))
-'''
-
-'''
-def clampPoint(p: Point, width, height):
-    return p._initCopy(p.x / (width / 2), p.y / (height / 2))
-'''
-
-
-def clampColor(*rgba):
-    """ Clamp a 0-255 color to a float between 1 and 0.
-        Helpful for openGL commands.
-    """
-    if len(rgba) == 1 and type(rgba[0]) in (tuple, list):
-        return tuple(c / 255 for c in rgba[0])
-    else:
-        return tuple(c / 255 for c in rgba)
-
-
-def invertColor(*rgba):
-    """ Inverts a color
-    """
-    if len(rgba) == 1 and type(rgba[0]) in (tuple, list):
-        return tuple(255 - c for c in rgba[0])
-    else:
-        return tuple(255 - c for c in rgba)
-
-
 def translate(value, fromStart, fromEnd, toStart, toEnd):
     return ((abs(value - fromStart) / abs(fromEnd - fromStart)) * abs(toEnd - toStart)) + toStart
-
 
 def frange(start, stop, skip=1.0, accuracy=10000000000000000):
     return [x / accuracy for x in range(int(start*accuracy), int(stop*accuracy), int(skip*accuracy))]
 
-
-# def getDist(a: 'Point', b: 'Point'):
-    # return math.sqrt(((b.x - a.x)**2) + ((b.y - a.y)**2))
-
-
 def getDist(ax, ay, bx, by):
     return math.sqrt(((bx - ax)**2) + ((by - ay)**2))
 
+def deg2rad(a, symbolic=False):
+    if symbolic:
+        if checkImport('sympy', 'pi', fatal=True):
+            return (a * pi / 180).simplify()
+    else:
+        return a * PI / 180.0
 
-def deg2rad(a):
-    return a * math.PI / 180.0
-
+def rad2deg(a, symbolic=False):
+    if symbolic:
+        if checkImport('sympy', 'pi', fatal=True):
+            return (a * 180 / pi).simplify()
+    else:
+        return a * 180.0 / PI
 
 def normalize2rad(a):
     while a < 0: a += math.tau
     while a >= math.tau: a -= math.tau
     return a
 
-
 def normalize2deg(a):
     while a < 0: a += 360
     while a >= 360: a -= 360
     return a
 
-
-def invertDict(d):
-    """ Returns the dict given, but with the keys as values and the values as keys. """
-    return dict(zip(d.values(), d.keys()))
-
-
 def portFilename(filename):
     return join(*filename.split('/'))
 
 
-#* API Specific functions
-
+################################### API Specific functions ###################################
+#* PrettyTable
 @dependsOnPackage('prettytable', 'PrettyTable')
 def quickTable(listOfLists, interpretAsRows=True, fieldNames=None, returnStr=False, sortByField:str=False, sortedReverse=False):
     """ A small, quick wrapper for the prettytable library """
@@ -1174,8 +1054,123 @@ def quickTable(listOfLists, interpretAsRows=True, fieldNames=None, returnStr=Fal
 
     return t.get_string() if returnStr else t
 
+#* My Own Point Classes
+@dependsOnPackage('Point', 'Point')
+def findClosestXPoint(target, comparatorList, offsetIndex = 0):
+    """ I've forgotten what *exactly* this does. I think it finds the point in a list of
+        points who's x point is closest to the target
+    """
+    finalDist = 1000000
+    result = 0
 
+    # for i in range(len(comparatorList) - offsetIndex):
+    for current in comparatorList:
+        # current = comparatorList[i + offsetIndex]
+        currentDist = abs(target.x - current.x)
+        if currentDist < finalDist:
+            result = current
+            finalDist = currentDist
+
+    return result
+
+@dependsOnPackage('Point', ('Point', 'Pointi', 'Pointf'))
+def getPointsAlongLine(p1, p2):
+    """ I don't remember what this does. """
+    p1 = Pointi(p1)
+    p2 = Pointi(p2)
+
+    returnMe = []
+
+    dx = p2.x - p1.x
+    dy = p2.y - p1.y
+
+    for x in range(p1.x, p2.x):
+        y = p1.y + dy * (x - p1.x) / dx
+        returnMe.append(Pointf(x, y))
+
+    return returnMe
+
+@dependsOnPackage('Point', 'Point')
+def rotatePoint(p, angle, pivotPoint, radians = False):
+    """ This rotates one point around another point a certain amount, and returns it's new position """
+    if not radians:
+        angle = math.radians(angle)
+    # p -= pivotPoint
+    # tmp = pygame.math.Vector2(p.data()).normalize().rotate(amount)
+    # return Pointf(tmp.x, tmp.y) + pivotPoint
+
+    dx = p.x - pivotPoint.x
+    dy = p.y - pivotPoint.y
+    newX = dx * math.cos(angle) - dy * math.sin(angle) + pivotPoint.x
+    newY = dx * math.sin(angle) + dy * math.cos(angle) + pivotPoint.y
+
+    return Pointf(newX, newY)
+
+@dependsOnPackage('Point', 'Point')
+def getMidPoint(p1, p2):
+    """ Returns the halfway point between 2 given points """
+    assert type(p1) == type(p2)
+    # return Pointf((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
+    return p1._initCopy((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
+
+@dependsOnPackage('Point', 'Point')
+def findClosestPoint(target, comparatorList):
+    """ Finds the closest point in the list to what it's given"""
+    finalDist = 1000000
+
+    for i in comparatorList:
+        current = getDist(target, i)
+        if current < finalDist:
+            finalDist = current
+
+    return finalDist
+
+@dependsOnPackage('Point', 'Point')
+def collidePoint(topLeft: 'Point', size: Union[tuple, list, 'Size'], target, inclusive=True):
+    """ Returns true if target is within the rectangle given by topLeft and size """
+    return isBetween(target.x, topLeft.x, size[0], beginInclusive=inclusive, endInclusive=inclusive) and \
+           isBetween(target.y, topLeft.y, size[1], beginInclusive=inclusive, endInclusive=inclusive)
+
+@dependsOnPackage('Point', 'Point')
+def getPointDist(a: 'Point', b: 'Point'):
+    return math.sqrt(((b.x - a.x)**2) + ((b.y - a.y)**2))
+
+#* Pygame
+@dependsOnPackage('pygame')
+def loadImage(filename):
+    # if pygame.image.get_extended():
+    filename = '/' + portableFilename(DATA + '/' + filename)
+
+    image = pygame.image.load(filename)
+    # self.image = self.image.convert()
+    image = image.convert_alpha()
+    # else:
+    #     assert(not f"Cannot support the file extension {}")
+    return image
+
+def loadAsset(dir, name, extension='png'):
+    return loadImage(dir + name + '.' + extension)
+
+@dependsOnPackage('pygame')
+def rotateSurface(surface, angle, pivot, offset):
+    """Rotate the surface around the pivot point.
+
+    Args:
+        surface (pygame.Surface): The surface that is to be rotated.
+        angle (float): Rotate by this angle.
+        pivot (tuple, list, pygame.math.Vector2): The pivot point.
+        offset (pygame.math.Vector2): This vector is added to the pivot.
+    """
+    rotated_image = pygame.transform.rotozoom(surface, -angle, 1)  # Rotate the image.
+    rotated_offset = offset.rotate(angle)  # Rotate the offset vector.
+    # Add the offset vector to the center/pivot point to shift the rect.
+    rect = rotated_image.get_rect(center=pivot+rotated_offset)
+    return rotated_image, rect  # Return the rotated image and shifted rect.
+
+
+################################### Old Functions I Don't Want to Delete ###################################
 # I don't remember what this does and I'm scared to delete it
+@confidence(45)
 @dependsOnPackage('tkinter', _as='tk')
 @dependsOnPackage('tkinter.ttk', _as='ttk')
 @dependsOnPackage('contextlib', 'redirect_stdout')
@@ -1217,58 +1212,17 @@ def stylenameElementOptions(stylename):
 
     # stylenameElementOptions('me.TButton')
 
+@depricated
+def ref(obj):
+    return pointer(py_object(obj))
 
-@dependsOnPackage('pygame')
-def loadImage(filename):
-    # if pygame.image.get_extended():
-    filename = '/' + portableFilename(DATA + '/' + filename)
-
-    image = pygame.image.load(filename)
-    # self.image = self.image.convert()
-    image = image.convert_alpha()
-    # else:
-    #     assert(not f"Cannot support the file extension {}")
-    return image
+@depricated
+def deref(ptr):
+    return ptr.contents.value
 
 
-def loadAsset(dir, name, extension='png'):
-    return loadImage(dir + name + '.' + extension)
-
-
-@dependsOnPackage('pygame')
-def rotateSurface(surface, angle, pivot, offset):
-    """Rotate the surface around the pivot point.
-
-    Args:
-        surface (pygame.Surface): The surface that is to be rotated.
-        angle (float): Rotate by this angle.
-        pivot (tuple, list, pygame.math.Vector2): The pivot point.
-        offset (pygame.math.Vector2): This vector is added to the pivot.
-    """
-    rotated_image = pygame.transform.rotozoom(surface, -angle, 1)  # Rotate the image.
-    rotated_offset = offset.rotate(angle)  # Rotate the offset vector.
-    # Add the offset vector to the center/pivot point to shift the rect.
-    rect = rotated_image.get_rect(center=pivot+rotated_offset)
-    return rotated_image, rect  # Return the rotated image and shifted rect.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-"""
-DECORATOR SYNTAX:
+################################### Notes ###################################
+""" DECORATOR SYNTAX:
 
 def decorator(*decoratorArgs, **decoratorKwArgs):
     def wrap(functionBeingDecorated):
@@ -1285,12 +1239,10 @@ def decorator(*decoratorArgs, **decoratorKwArgs):
             return func(*funcArgs, **funcKwArgs)
         return innerWrap
     return wrap
-
 """
 
 
-#* TESTING
-
+################################### Tests ###################################
 #* parseColorParams tests
 if False:
     # setVerbose(True)
