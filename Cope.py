@@ -15,19 +15,24 @@ import re
 from ctypes import pointer, py_object
 from inspect import stack
 from os.path import basename, dirname, join
-# from Point import Pointf, Pointi, Point
 from random import randint
 from time import process_time
 from typing import Any, Callable, Iterable, Optional, Union
 from enum import Enum, auto
 
+# ENABLE_PYGAME_SPECIFIC_FEATURES       = False
+# ENABLE_TKINTER_SPECIFIC_FEATURES      = False
+# ENABLE_PRETTYTABLE_SPECIFIC_FEATURES  = True
+# ENABLE_CUSTOM_POINT_SPECIFIC_FEATURES = False
+
 try:
     from varname import (ImproperUseError, VarnameRetrievingError, argname, nameof)
 except ImportError:
-    Warning("Can't to import Cope.py (for debugging). Try installing varname via pip (pip install varname --user).")
+    Warning("Can't import debug from Cope.py. Try running pip install varname.")
     varnameImported = False
 else:
     varnameImported = True
+
 
 # This is because I write a lot of C/C++ code
 true, false = True, False
@@ -683,6 +688,7 @@ def depricated(why=''):
         return innerWrap
     return wrap
 
+
 def reprise(obj, *args, **kwargs):
     """ Sets the __repr__ function to the __str__ function of a class.
         Useful for custom classes with overloaded string functions
@@ -690,9 +696,49 @@ def reprise(obj, *args, **kwargs):
     obj.__repr__ = obj.__str__
     return obj
 
-# TODO Finish this
-# def checkImport(lib, package=None):
-    # module = __import__(mname, {}, {}, (cls,))
+
+def checkImport(package:str, specificModules=[], _as=None,
+                fatal:bool=False, printWarning:Union[str, bool]=True,
+                _globals=globals(), _locals=locals(), level=0
+                ) -> "(Union[package, (packages,)], worked)":
+    if type(specificModules) is str:
+        specificModules = [specificModules]
+    try:
+        _temp = __import__(package, _globals, _locals, specificModules, level)
+    except ImportError:
+        if type(printWarning) is str:
+            print(printWarning)
+        elif printWarning:
+            if len(specificModules):
+                print(f'Can\'t import {tuple(specificModules)} from {package}. Have you installed the associated pip package?')
+            else:
+                print(f'Can\'t import {package}. Have you installed the associated pip package?')
+        if fatal:
+            raise ImportError(package)
+        return False
+    else:
+        if len(specificModules):
+            for i in specificModules[:-1]:
+                globals()[i] = _temp.__getattribute__(i)
+            globals()[_as if _as else specificModules[-1]] = _temp.__getattribute__(specificModules[-1])
+        else:
+            globals()[_as if _as else package] = _temp
+        return True
+
+
+def dependsOnPackage(package:str, specificModules=[], _as=None,
+                fatal:bool=True, printWarning:Union[str, bool]=True,
+                _globals=globals(), _locals=locals(), level=0):
+    def wrap(func):
+        def innerWrap(*funcArgs, **funcKwArgs):
+            if checkImport(package, specificModules, _as, fatal,
+                           printWarning, globals, locals, level):
+                return func(*funcArgs, **funcKwArgs)
+            else:
+                return None
+        return innerWrap
+    return wrap
+
 
 # TODO Make this use piping and return the command output
 def runCmd(args):
@@ -816,6 +862,7 @@ def getMidPoint(p1, p2):
     # return Pointf((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
     return p1._initCopy((p1.x + p2.x) / 2, (p1.y + p2.y) / 2)
 
+
 timingData = {}
 def timeFunc(func, accuracy=5):
     """ A function decorator that prints how long it takes for a function to run """
@@ -842,6 +889,7 @@ def timeFunc(func, accuracy=5):
         #  ' ' * (15 - len(name)),
         return returns
     return wrap
+
 
 def _printTimingData(accuracy=5):
     """ I realized *after* I wrote this that this is a essentially profiler. Oops. """
@@ -977,6 +1025,10 @@ def constrain(val, low, high):
     """ Constrains val to be within low and high """
     return min(high, max(low, val))
 
+#* Iterable Functions
+def isiterable(obj):
+    return isinstance(obj, Iterable)
+
 
 def ensureIterable(obj, useList=False):
     if not isinstance(obj, Iterable):
@@ -999,6 +1051,28 @@ def ensureNotIterable(obj, emptyBecomes=_None):
     else:
         return obj
 
+
+def flattenList(iterable, recursive=False, useList=True):
+    if recursive:
+        raise NotImplementedError
+
+    useType = list if useList else type(iterable)
+    rtn = useType()
+    for i in iterable:
+        rtn += useType(i)
+    return rtn
+    # print(flattenList(('a', 'b', [1, 2, 3]), useList=False))
+
+
+def removeDuplicates(iterable):
+    return type(iterable)(set(iterable))
+
+
+def normalizeList(iterable, ensureList=False):
+    if ensureList:
+        return removeDuplicates(flattenList(ensureIterable(list(iterable), True)))
+    else:
+        return ensureNotIterable(removeDuplicates(flattenList(ensureIterable(list(iterable), True))))
 
 # Returns the index of the first object in a list in which key returns true to.
 # Example: getIndexWith([ [5, 3], [2, 3], [7, 3] ], lambda x: x[0] + x[1] == 10) -> 2
@@ -1039,14 +1113,6 @@ def invertColor(*rgba):
     else:
         return tuple(255 - c for c in rgba)
 
-'''
-def toOpenGLCoord(p: Point, width, height):
-    return Pointf((p.x - (width / 2)) / (width / 2), (p.y - (height / 2)) / (height / 2))
-'''
-'''
-def toTLCoord(p: Point, width, height):
-    return Pointi((p.x * (width / 2)) + (width / 2), (p.y * (height / 2)) + (height / 2))
-'''
 
 def translate(value, fromStart, fromEnd, toStart, toEnd):
     return ((abs(value - fromStart) / abs(fromEnd - fromStart)) * abs(toEnd - toStart)) + toStart
@@ -1085,37 +1151,35 @@ def invertDict(d):
     return dict(zip(d.values(), d.keys()))
 
 
-def quickTable(listOfLists, interpretAsRows=True, fieldNames=None, returnStr=False, sortByField:str=False, sortedReverse=False):
-    """ A small wrapper for the prettytable library """
-    try:
-        from prettytable import PrettyTable
-    except ImportError:
-        print('Can\'t import prettyTable, which is nessicary for Cope.quickTable(). Try running "pip install prettyTable"')
-    else:
-        t = PrettyTable()
-        if fieldNames is not None:
-            t.field_names = fieldNames
-        if interpretAsRows:
-            t.add_rows(listOfLists)
-        else:
-            t.add_columns(listOfLists)
-        if sortByField:
-            t.sortby = sortByField
-            t.reversesort = sortedReverse
-
-        return t.get_string() if returnStr else t
-
+def portFilename(filename):
+    return join(*filename.split('/'))
 
 
 #* API Specific functions
 
-#* Tkinter (ttk specifically)
+@dependsOnPackage('prettytable', 'PrettyTable')
+def quickTable(listOfLists, interpretAsRows=True, fieldNames=None, returnStr=False, sortByField:str=False, sortedReverse=False):
+    """ A small, quick wrapper for the prettytable library """
+    t = PrettyTable()
+    if interpretAsRows:
+        if fieldNames is not None:
+            t.field_names = fieldNames
+        t.add_rows(listOfLists)
+    else:
+        for i in listOfLists:
+            t.add_column(str(i[0]), i[1:])
+    if sortByField:
+        t.sortby = sortByField
+        t.reversesort = sortedReverse
 
-# import tkinter as tk
-# import tkinter.ttk as ttk
-# from contextlib import redirect_stdout
-# import ttkthemes
+    return t.get_string() if returnStr else t
+
+
 # I don't remember what this does and I'm scared to delete it
+@dependsOnPackage('tkinter', _as='tk')
+@dependsOnPackage('tkinter.ttk', _as='ttk')
+@dependsOnPackage('contextlib', 'redirect_stdout')
+@dependsOnPackage('ttkthemes')
 def stylenameElementOptions(stylename):
     '''Function to expose the options of every element associated to a widget
        stylename.'''
@@ -1148,45 +1212,13 @@ def stylenameElementOptions(stylename):
                     'widget_elements_options({0}) is not a regonised stylename.'
                     .format(stylename))
 
+    # for i in ['TButton', 'TCheckbutton', 'TCombobox', 'TEntry', 'TFrame', 'TLabel', 'TLabelFrame', 'TMenubutton', 'TNotebook', 'TPanedwindow', 'Horizontal.TProgressbar', 'Vertical.TProgressbar', 'TRadiobutton', 'Horizontal.TScale', 'Vertical.TScale', 'Horizontal.TScrollbar', 'Vertical.TScrollbar', 'TSeparator', 'TSizegrip', 'Treeview', 'TSpinbox']:
+    #     stylenameElementOptions('test.' + i)
 
-# for i in ['TButton', 'TCheckbutton', 'TCombobox', 'TEntry', 'TFrame', 'TLabel', 'TLabelFrame', 'TMenubutton', 'TNotebook', 'TPanedwindow', 'Horizontal.TProgressbar', 'Vertical.TProgressbar', 'TRadiobutton', 'Horizontal.TScale', 'Vertical.TScale', 'Horizontal.TScrollbar', 'Vertical.TScrollbar', 'TSeparator', 'TSizegrip', 'Treeview', 'TSpinbox']:
-#     stylenameElementOptions('test.' + i)
-
-# stylenameElementOptions('me.TButton')
-
+    # stylenameElementOptions('me.TButton')
 
 
-
-'''
-from Point import *
-import os, math
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
-import pygame
-import time
-
-class Pointer:
-    def __init__(self, val):
-        self.value = val
-
-    def get(self):
-
-
-def loadAsset(dir, name, extension='png'):
-    return loadImage(dir + name + '.' + extension)
-
-
-def getGroundPoints(groundPoints):
-    returnMe = []
-    for i in range(len(groundPoints) - 1):
-        returnMe += getPointsAlongLine(groundPoints[i], groundPoints[i + 1])
-
-    return returnMe
-
-
-def portableFilename(filename):
-    return os.path.join(*filename.split('/'))
-
-
+@dependsOnPackage('pygame')
 def loadImage(filename):
     # if pygame.image.get_extended():
     filename = '/' + portableFilename(DATA + '/' + filename)
@@ -1199,11 +1231,11 @@ def loadImage(filename):
     return image
 
 
-def drawAllGroundPoints(surface, gp):
-    for i in gp:
-        pygame.gfxdraw.pixel(surface, *i.datai(), [255, 0, 0])
+def loadAsset(dir, name, extension='png'):
+    return loadImage(dir + name + '.' + extension)
 
 
+@dependsOnPackage('pygame')
 def rotateSurface(surface, angle, pivot, offset):
     """Rotate the surface around the pivot point.
 
@@ -1218,7 +1250,21 @@ def rotateSurface(surface, angle, pivot, offset):
     # Add the offset vector to the center/pivot point to shift the rect.
     rect = rotated_image.get_rect(center=pivot+rotated_offset)
     return rotated_image, rect  # Return the rotated image and shifted rect.
-'''
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 """
@@ -1241,14 +1287,6 @@ def decorator(*decoratorArgs, **decoratorKwArgs):
     return wrap
 
 """
-
-
-
-
-
-
-
-
 
 
 #* TESTING
