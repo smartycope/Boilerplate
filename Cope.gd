@@ -1,6 +1,5 @@
 extends Node
 
-
 var debugCount = -1 setget cantSet ,_incrementDebugCounter
 # var current_scene = null
 var instancedScenes = {}
@@ -97,7 +96,7 @@ class SceneLoader:
         # Optionally, to make it compatible with the SceneTree.change_scene() API.
         tree_func.call_func().set_current_scene(current_scene)
 
-        Cope.current_scene = current_scene
+        self.current_scene = current_scene
 
         # yield(current_scene, "ready")
         emit_signal("scene_ready", current_scene)
@@ -116,23 +115,6 @@ func gotoSavedScene(name, freeScene=true, isPath=false):
 func gotoScene(name, freeScene=true, isPath=false):
     return SceneLoader.new(funcref(self, "get_tree"), current_scene, name, isPath, freeScene)
 
-
-#func debugShips(shipList, prefix='', stackTrace=false):
-#    if shipList != null and len(shipList):
-#        if shipList[0] is Ship:
-#            var text = ''
-#            for i in shipList:
-#                text += i.name + ', '
-#            debug('[' + text + ']', prefix, stackTrace, 2)
-#        elif shipList[0] is EncodedObjectAsID:
-#            var text = ''
-#            for i in shipList:
-#                text += instance_from_id(i.object_id).name + ', '
-#            debug('[' + text + ']', prefix, stackTrace, 2)
-#        else:
-#            debug(shipList, prefix, stackTrace, 2)
-#    else:
-#        debug(shipList, prefix, stackTrace, 2)
 
 static func getJSON(filename):
     var file = File.new()
@@ -165,21 +147,38 @@ static func getJSONvalue(filename, key):
     return getJSON(filename)[key]
 
 
-func debug(text, prefix='', stackTrace=false, _calls=1):
-    if text == null:
-        text = 'NULL'
+func _printMetadata(calls=2):
+    var frame = get_stack()[calls]
 
-    var frame = get_stack()[_calls]
+    printraw('%-3d["%s", line %d, in %s()] ' % [self.debugCount, frame.source.get_file(), frame.line, frame.function])
+    # print
 
-    prefix += ' = ' if len(prefix) else ''
 
-    var trace = ''
-    for i in get_stack().slice(_calls, -1):
-        trace += '[%s->%s()->%d]\n' % [i.source.get_file(), i.function, i.line]
-    trace = '\n' + trace
+func debug(variable=' 6^%/*sdf\\/\\&%$ddd666', name='', stackTrace=false, _calls=1):
+    if variable == ' 6^%/*sdf\\/\\&%$ddd666':
+        _printMetadata()
+        print('HERE! HERE!')
+        return
 
-    var hasLen = (text is Array) or (text is Dictionary)
+    if variable == null:
+        variable = 'NULL'
 
-    print("%-3d[%s->%s()->%d]: %s" % [self.debugCount, frame.source.get_file(), frame.function, frame.line, prefix], text,
-          '(len=%d)' % len(text) if hasLen else '',
-          trace if stackTrace else '\n')
+    name += ' = ' if len(name) else ''
+
+    # var trace = ''
+    # for i in get_stack().slice(_calls, -1):
+    #     trace += '[%s->%s()->%d]\n' % [i.source.get_file(), i.function, i.line]
+    # trace = '\n' + trace
+
+    if stackTrace:
+        print_stack()
+
+    var hasLen = (variable is Array) or (variable is Dictionary)
+
+    _printMetadata()
+    print(name, variable, '(len=%d)' % len(variable) if hasLen else '')
+    return variable
+
+func todo(feature):
+    _printMetadata()
+    print('TODO: %s' % feature)

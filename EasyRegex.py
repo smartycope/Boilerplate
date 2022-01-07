@@ -193,7 +193,8 @@ try:
     from random_word import RandomWords
     _rw = RandomWords()
 except ImportError:
-    print("Can't import random_word (for the EasyRegex invert function). Try pip install Random-Words.")
+    if False:
+        print("Can't import random_word (for the EasyRegex invert function). Try pip install Random-Words.")
     _rw = None
 
 
@@ -286,7 +287,7 @@ class EasyRegexMember:
         print(f"Testing regex expression:\n{self}\nfor matches in:\n{testString}")
         match = re.search(str(self), testString)
         if match:
-            print(f'Result: Found. Match = "{match.group()}", Span = {match.span()} ')
+            print(f'\nResult: Found.\nMatch = "{match.groups()}", Span = {match.span()} ')
         else:
             print('Result: Not Found')
         print('-----------------------------------')
@@ -450,10 +451,12 @@ octDigit   = EasyRegexSingleton(r'\O',  _defaultInvert(choice(_digits[:8])))
 anything   = EasyRegexSingleton(r'.',   _defaultInvert(choice(_everything)))
 chunk      = EasyRegexSingleton(r'.+',  _defaultInvert(''.join(choices(_everything, k=randint(1, _alot)))))
 stuff      = chunk
+whiteChunk = whitechunk
 
 # Explicit Characters
 spaceOrTab     = EasyRegexSingleton(r'[ \t]',  _defaultInvert(' \t'))
 newLine        = EasyRegexSingleton(r'\n',     _defaultInvert('\n'))
+newline = newLine
 carriageReturn = EasyRegexSingleton(r'\r',     _defaultInvert('\r'))
 tab            = EasyRegexSingleton(r'\t',     _defaultInvert('\t'))
 space          = EasyRegexSingleton(r' ',      _defaultInvert(' '))
@@ -475,11 +478,21 @@ either        = EasyRegexSingleton(lambda cur, input, or_input: cur + rf'({input
                                    lambda cur, input, or_input: cur + input if randint(0, 1) else or_input)
 anyBetween    = EasyRegexSingleton(lambda cur, input, and_input: cur + r'[' + input + r'-' + and_input + r']')
 
-def _anyOfFunc(cur, *inputs):
+def _anyCharsFunc(cur, *inputs):
     cur += r'['
     for i in inputs:
         cur += i
     cur += r']'
+    return cur
+anyChars = EasyRegexSingleton(_anyCharsFunc, lambda cur, *inputs: choice(inputs))
+
+def _anyOfFunc(cur, *inputs):
+    cur += r'('
+    for i in inputs:
+        cur += i
+        cur += '|'
+    cur = cur[:-1]
+    cur += r')'
     return cur
 anyOf = EasyRegexSingleton(_anyOfFunc, lambda cur, *inputs: choice(inputs))
 
@@ -537,8 +550,23 @@ group          = EasyRegexSingleton(lambda cur, chain: f'{cur}({chain})',
 notGroup       = EasyRegexSingleton(lambda cur, chain: f'{cur}(?:{chain})',
                                     lambda cur, chain: cur + chain)
 
-namedGroup     = EasyRegexSingleton(lambda cur, name, chain: f'{cur}(?P {name} {chain})')
-referenceGroup = EasyRegexSingleton(lambda cur, name:        f'{cur}(?P={name})')
+namedGroup     = EasyRegexSingleton(lambda cur, name, chain: f'{cur}(?P<{name}> {chain})')
+# referenceGroup = EasyRegexSingleton(lambda cur, name:        f'{cur}(?P={name})')
+
+# TODO figure this out and add it
+# Replace Syntax
+# Use these on the replacement end to reference groups specified in the original regex
+replaceGroup          = EasyRegexSingleton(lambda cur, num:  f'{cur}\\g<{num}>')
+# replaceNamedGroup     = EasyRegexSingleton(lambda cur, name: f'{cur}?P={name})')
+replaceNamedGroup     = replaceGroup
+
+# # I don't think this inverse is correct
+# notGroup       = EasyRegexSingleton(lambda cur, chain: f'{cur}(?:{chain})',
+#                                     lambda cur, chain: cur + chain)
+
+# namedGroup     = EasyRegexSingleton(lambda cur, name, chain: f'{cur}(?P {name} {chain})')
+# referenceGroup = EasyRegexSingleton(lambda cur, name:        f'{cur}(?P={name})')
+
 
 
 # TODO Implement Dialects

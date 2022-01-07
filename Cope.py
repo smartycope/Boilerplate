@@ -8,11 +8,28 @@ __email__ = 'smartycope@gmail.com'
 __license__ = 'GPL 3.0'
 __copyright__ = '(c) 2021, Copeland Carter'
 
+################################### Suggested Features ###################################
+# make confidence print the confidence level
+# make that self-modifying function, both one that removes itself and one that adds a line above it
+# I think @debug and @todo are still failing periodically
+# Add a function that takes a parameter and a bunch of values and just checks to see if the parameter is one of those values, otherwise throws a type error with a preset message
+# get the key class that I wrote on Rebecca
+# change _debugBeingUsedAsDecorator() to use an enum of decorator types, and also make it generally useable
+# also, couldn't it automatically get the function name from the metadata?
+# write an alias decorator that sets the thing it's decorating to a provided alias and injects it into the global namespace
+# add a filter parameter that lets you specify a function that must return true
+# if todo is called with no parameters, make it say "{functionName} needs implemented!" or something
+# Add a global that makes it so confidence always prints it's confidence level
+# Uhh... how do I not have a logging function??? Add a logging function, a global debug level, possibly a debug level enum, and incorperate verbose
+# A title case function that doesn't ignore exisiting case
+# Add string color names to parseColor
+
 
 ################################### Imports ###################################
-import atexit
-from math import tau, pi as PI
-import re
+from atexit import register as registerExit
+from re import search as research
+from re import match as rematch
+from math import floor, ceil, tau, pi as PI
 from ctypes import pointer, py_object
 from inspect import stack
 from os.path import basename, dirname, join
@@ -20,17 +37,13 @@ from random import randint
 from time import process_time
 from typing import Any, Callable, Iterable, Optional, Union
 from enum import Enum, auto
-
-# try:
-#     from varname import (ImproperUseError, VarnameRetrievingError, argname, nameof)
-# except ImportError:
-#     Warning("Can't import debug from Cope.py. Try running pip install varname.")
-#     varnameImported = False
-# else:
-#     varnameImported = True
+from copy import deepcopy
+from os import get_terminal_size
 
 
 ################################### Constants ###################################
+ENABLE_TESTING = True
+
 # This is because I write a lot of C/C++ code
 true, false = True, False
 
@@ -45,31 +58,6 @@ DISPLAY_LINK = False
 HIDE_TODO    = False
 # FORCE_TODO_LINK = False
 
-# Default color constants
-DEFAULT_COLOR = (204, 204, 204)
-ALERT_COLOR =   (220, 0, 0)
-WARN_COLOR =    (150, 30, 30)
-
-#* A set of distinct characters for debugging
-_colors = [(43, 142, 213), (19, 178, 118), (163, 61, 148), (255, 170, 0), (255, 170, 255), (170, 0, 255)]
-
-# Default colors for debugging -- None for using the previously set color
-NOTE_CALL_COLOR =     (211, 130, 0)
-EMPTY_COLOR =         NOTE_CALL_COLOR
-CONTEXT_COLOR =       None
-COUNT_COLOR =         (34, 111, 157)
-DEFAULT_DEBUG_COLOR = (34, 179, 99)
-TODO_COLOR          = (128, 64, 64)
-STACK_TRACE_COLOR   = (159, 148, 211)
-CONFIDENCE_WARNING_COLOR = (255, 190, 70)
-DEPRICATED_WARNING_COLOR = WARN_COLOR
-
-DEBUG_METADATA_DARKEN = 60
-DEBUG_TYPE_DARKEN     = 20
-DEBUG_NAME_DARKEN     = -30
-DEBUG_EQUALS_COLOR    = DEFAULT_COLOR
-DEBUG_VALUE_DARKEN    = 0
-
 #* Convenience commonly used paths. ROOT can be set by the setRoot() function
 DIR  = dirname(__file__)
 ROOT = dirname(DIR) if basename(DIR) in ('src', 'source') else DIR
@@ -77,7 +65,8 @@ ROOT = dirname(DIR) if basename(DIR) in ('src', 'source') else DIR
 # Yes, this is not strictly accurate.
 MAX_INT_SIZE = 2147483645
 
-VERBOSE = False
+VERBOSE = True
+DEBUG_LEVEL = 0
 
 # A unique dummy class for parameters
 class _None: pass
@@ -116,6 +105,10 @@ def verbose():
     global VERBOSE
     return VERBOSE
 
+def setDebugLevel(to):
+    global DEBUG_LEVEL
+    DEBUG_LEVEL = to
+
 
 ################################### Enums ###################################
 class CommonResponses:
@@ -131,6 +124,38 @@ class CommonResponses:
     MODERATE_AMOUNT = ('fairly', 'somewhat', 'enough')
     SOME_AMOUNT = ('a little bit', 'a bit', 'a little', 'ish', 'not a lot', 'not a ton', 'some', 'mostly')
     LOW_AMOUNT  = ("not at all", 'not very', 'not much', 'low', 'none', 'none at all', 'not terribly')
+
+class DebugLevel(Enum):
+    NONE = 0
+    WARNINGS = 1
+    ERRORS = 2
+
+class Colors:
+    # Default color constants
+    DEFAULT = (204, 204, 204)
+    ALERT   = (220, 0, 0)
+    WARN    = (150, 30, 30)
+    ERROR   = ALERT
+
+    # A set of distinct characters for debugging
+    _colors = [(43, 142, 213), (19, 178, 118), (163, 61, 148), (255, 170, 0), (255, 170, 255), (170, 0, 255)]
+
+    # Default colors for debugging -- None for using the previously set color
+    NOTE_CALL          = (211, 130, 0)
+    EMPTY              = NOTE_CALL
+    CONTEXT            = None
+    COUNT              = (34, 111, 157)
+    DEFAULT_DEBUG      = (34, 179, 99)
+    TODO               = (128, 64, 64)
+    STACK_TRACE        = (159, 148, 211)
+    CONFIDENCE_WARNING = (255, 190, 70)
+    DEPRICATED_WARNING = WARN
+
+    DEBUG_EQUALS          = DEFAULT
+    DEBUG_METADATA_DARKEN = 70
+    DEBUG_TYPE_DARKEN     = 10
+    DEBUG_NAME_DARKEN     = -60
+    DEBUG_VALUE_DARKEN    = 0
 
 
 ################################### Color Utilites ###################################
@@ -161,7 +186,7 @@ def parseColorParams(r, g=None, b=None, a=None, bg=False) -> "((r, g, b, a), bac
 
     #* We've been given a single basic value
     elif type(r) is int and b is None:
-        return (_colors[r] + ((a,) if a is not None else ()), (False if g is None else g) if not bg else bg)
+        return (Colors._colors[r] + ((a,) if a is not None else ()), (False if g is None else g) if not bg else bg)
 
     #* We've been given 3 seperate parameters
     elif type(r) is int and g is not None and b is not None:
@@ -172,7 +197,7 @@ def parseColorParams(r, g=None, b=None, a=None, bg=False) -> "((r, g, b, a), bac
 
     #* We've been given None
     elif r is None:
-        return (DEFAULT_COLOR, bg)
+        return (Colors.DEFAULT, bg)
 
     #* We're not sure how to interpret the parameters given
     else:
@@ -188,7 +213,7 @@ class coloredOutput:
             to have the terminal reset to that color instead of white.
         https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
     """
-    def __init__(self, r, g=None, b=None, foreground=True, curColor=DEFAULT_COLOR):
+    def __init__(self, r, g=None, b=None, foreground=True, curColor=Colors.DEFAULT):
         color, bg = parseColorParams(r, g, b, bg=foreground)
         self.fg = bg
         self.r, self.g, self.b = color
@@ -279,6 +304,7 @@ def dependsOnPackage(package:str, specificModules=[], _as=None,
 
 ################################### Debug ###################################
 varnameImported = checkImport('varname', ('ImproperUseError', 'VarnameRetrievingError', 'argname', 'nameof'), fatal=False)
+DEBUGGING_DEBUG = False
 
 def _debugGetMetaData(calls=1):
     """ Gets the meta data of the line you're calling this function from.
@@ -300,7 +326,7 @@ def _debugGetLink(calls=0, full=False, customMetaData=None):
 
 #todo This doesn't work right
 #todo somehow round any float to a given length, including those printed in iterables
-def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, minItems: int=2, maxItems: int=10) -> str:
+def _debugGetListStr(iterable: Union[tuple, list, set, dict], useMultiline:bool=True, limitToLine: bool=False, minItems: int=2, maxItems: int=50) -> str:
     """ "Cast" a tuple, list, set or dict to a string, automatically shorten
         it if it's long, and display how long it is.
 
@@ -313,9 +339,37 @@ def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, m
         Note:
             If limitToLine is True, it will overrule maxItems, but *not* minItems
     """
+    def getBrace(opening):
+        if type(iterable) is list:
+            return '[' if opening else ']'
+        elif type(iterable) in (set, dict):
+            return '{' if opening else '}'
+        else:
+            return '(' if opening else ')'
+
+    lengthAddOn = f'(len={len(iterable)})'
+    defaultStr  = str(iterable)
+
+    # Print in lines
+    if (not limitToLine and len(defaultStr) + len(lengthAddOn) > (get_terminal_size().columns / 2)) or useMultiline:
+        rtnStr = f'{lengthAddOn} {getBrace(True)}'
+        if type(iterable) is dict:
+            for key, val in iterable.items():
+                rtnStr += f'\n\t<{type(key).__name__}> {key}: <{type(val).__name__}> {val}'
+        else:
+            for cnt, i in enumerate(iterable):
+                rtnStr += f'\n\t{cnt}: <{type(i).__name__}> {i}'
+        if len(iterable):
+            rtnStr += '\n'
+        rtnStr += getBrace(False)
+    else:
+        rtnStr = defaultStr + lengthAddOn
+
+    return rtnStr
+
+
+    """
     if type(v) in (tuple, list, set) and len(v) > minItems:
-        from copy import deepcopy
-        from os import get_terminal_size
         if type(v) is set:
             v = tuple(v)
 
@@ -350,25 +404,42 @@ def _debugGetListStr(v: Union[tuple, list, set, dict], limitToLine: bool=True, m
 
     else:
         return str(v) + f'(len={len(v)})'
+    """
 
-def _debugGetTypename(var):
-    if type(var) in (tuple, list, set):
-        returnMe = type(var).__name__
-        while type(var) in (tuple, list, set):
+def _debugGetTypename(var, addBraces=True):
+    def getUniqueType(item):
+        returnMe = type(item).__name__
+        while type(item) in (tuple, list, set):
             try:
-                var = var[0]
+                item = item[0]
             except (KeyError, IndexError, TypeError):
                 returnMe += '('
                 break
-            returnMe += '(' + type(var).__name__
+            returnMe += '(' + type(item).__name__
 
         cnt = 0
         for i in returnMe:
             if i == '(':
                 cnt += 1
         return returnMe + (')'*cnt)
+
+    if type(var) is dict:
+        if len(var) > 0:
+            rtn = f'dict({type(list(var.keys())[0]).__name__}:{type(list(var.values())[0]).__name__})'
+        else:
+            rtn = 'dict()'
+    elif type(var) in (tuple, list, set, dict):
+        types = []
+        for i in var:
+            types.append(getUniqueType(i))
+        types = sorted(set(types), key=lambda x: types.index(x))
+        fullName = type(var).__name__ + str(tuple(types)).replace("'", "")
+        if len(types) == 1:
+            fullName = fullName[:-2] + ')'
+        rtn = fullName
     else:
-        return type(var).__name__
+        rtn = type(var).__name__
+    return f'<{rtn}>' if addBraces else rtn
 
 def _debugPrintLink(filename, lineNum, function=None):
     """ Print a VSCodium clickable file and line number
@@ -387,7 +458,7 @@ def _debugPrintLink(filename, lineNum, function=None):
     _resetColor()
     print('\033[0m', end='')
 
-def _printDebugCount(leftAdjust=2, color: int=COUNT_COLOR):
+def _printDebugCount(leftAdjust=2, color: int=Colors.COUNT):
     global _debugCount
     _debugCount += 1
     with coloredOutput(color):
@@ -395,7 +466,7 @@ def _printDebugCount(leftAdjust=2, color: int=COUNT_COLOR):
 
 def _debugManualGetVarName(var, full=True, calls=2, metadata=None):
     try:
-        return re.search(r'(?<=debug\().+(?=,(\s)?[name color showFunc showFile showPath useRepr calls background limitToLine minItems maxItems stackTrace raiseError clr _repr trace bg throwError throw \) ])',
+        return research(r'(?<=debug\().+(?=,(\s)?[name color showFunc showFile showPath useRepr calls background limitToLine minItems maxItems stackTrace raiseError clr _repr trace bg throwError throw \) ])',
                          metadata.code_context[0]).group()
     except:
         return '?'
@@ -413,7 +484,7 @@ def _debugGetVarName(var, full=True, calls=1, metadata=None):
                 # print('var type:', type(var))
                 return nameof(var, frame=calls+1)
             except Exception as e:
-                if VERBOSE and not isinstance(var, Exception):
+                if VERBOSE and DEBUGGING_DEBUG and not isinstance(var, Exception):
                     raise e
                 else:
                     return _debugManualGetVarName(var, full, calls+1, metadata)
@@ -477,7 +548,7 @@ def _debugBeingUsedAsDecorator(funcName, metadata=None, calls=1) -> 'Union[1, 2,
 
     return False
 
-def printContext(calls=1, color=CONTEXT_COLOR, showFunc=True, showFile=True, showPath=True):
+def printContext(calls=1, color=Colors.CONTEXT, showFunc=True, showFile=True, showPath=True):
     _printDebugCount()
     with coloredOutput(color):
         print(_debugGetContext(_debugGetMetaData(1 + calls), True,
@@ -538,15 +609,15 @@ def debug(var=_None,                # The variable to debug
     useRepr = useRepr or _repr
     background = background or bg
     throwError = throw or throwError or raiseError
-    useColor = (DEFAULT_DEBUG_COLOR if clr is _None else clr) if color is _None else color
+    useColor = (Colors.DEFAULT_DEBUG if clr is _None else clr) if color is _None else color
 
     if maxItems < 0 or maxItems is None:
         maxItems = 1000000
 
     if isinstance(var, Warning):
-        useColor = WARN_COLOR
+        useColor = Colors.WARN
     elif isinstance(var, Exception):
-        useColor = ALERT_COLOR
+        useColor = Colors.ALERT
 
     # +1 call because we don't want to get this line, but the one before it
     metadata = _debugGetMetaData(calls+1)
@@ -560,14 +631,14 @@ def debug(var=_None,                # The variable to debug
             _printDebugCount()
 
             if stackTrace:
-                with coloredOutput(STACK_TRACE_COLOR):
+                with coloredOutput(Colors.STACK_TRACE):
                     _debugPrintStackTrace(2, True, showFunc, showFile, showPath)
 
 
-            with coloredOutput(NOTE_CALL_COLOR):
+            with coloredOutput(Colors.NOTE_CALL):
                 print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
                 print(f'{var.__name__}() called!')
-
+                # print(args)
             return var(*args, **kwargs)
 
         return wrap
@@ -575,12 +646,12 @@ def debug(var=_None,                # The variable to debug
     _printDebugCount()
 
     if stackTrace:
-        with coloredOutput(STACK_TRACE_COLOR):
+        with coloredOutput(Colors.STACK_TRACE):
             _debugPrintStackTrace(calls+1, True, showFunc, showFile, showPath)
 
     #* Only print the "HERE! HERE!" message
     if var is _None:
-        with coloredOutput(useColor if color is not _None else EMPTY_COLOR, not background):
+        with coloredOutput(useColor if color is not _None else Colors.EMPTY, not background):
             print(_debugGetContext(metadata, True, showFunc or DISPLAY_FUNC, showFile or DISPLAY_FILE, showPath or DISPLAY_PATH), end='')
             if not metadata.function.startswith('<'):
                 print(f'{metadata.function}() called ', end='')
@@ -588,11 +659,11 @@ def debug(var=_None,                # The variable to debug
         return
 
 
-    metadataColor = darken(DEBUG_METADATA_DARKEN,  useColor)
-    typeColor     = darken(DEBUG_TYPE_DARKEN,  useColor)
-    nameColor     = darken(DEBUG_NAME_DARKEN, useColor)
-    equalsColor   = DEBUG_EQUALS_COLOR
-    valueColor    = darken(DEBUG_VALUE_DARKEN, useColor)
+    metadataColor = darken(Colors.DEBUG_METADATA_DARKEN,  useColor)
+    typeColor     = darken(Colors.DEBUG_TYPE_DARKEN,  useColor)
+    nameColor     = darken(Colors.DEBUG_NAME_DARKEN, useColor)
+    equalsColor   = Colors.DEBUG_EQUALS
+    valueColor    = darken(Colors.DEBUG_VALUE_DARKEN, useColor)
     #* Print the standard line
     with coloredOutput(metadataColor, not background):
         print(_debugGetContext(metadata, True,
@@ -653,7 +724,7 @@ def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=
     def printTodo(disableFunc):
         if not HIDE_TODO and enabled:
             _printDebugCount()
-            with coloredOutput(TODO_COLOR):
+            with coloredOutput(Colors.TODO):
                 print(_debugGetContext(metadata, True,
                                       (showFunc or DISPLAY_FUNC) and not disableFunc,
                                        showFile or DISPLAY_FILE,
@@ -683,24 +754,55 @@ def todo(featureName=None, enabled=True, blocking=True, showFunc=True, showFile=
     else:
         printTodo(False)
 
-def confidence(level):
+def confidence(level, interpretAs:int=None):
+    # debug(level)
+    # debug(interpretAs)
     def wrap(func):
+        # debug(func)
         def innerWrap(*funcArgs, **funcKwArgs):
+            # debug(funcArgs)
+            # debug(funcKwArgs)
+            definiteFailResponses = ()
+            possiblyFailResponses = ()
+            probablyFailResponses = ()
+
             def definiteFail():
                 raise UserWarning(f"{func.__name__} is going to fail.")
 
             def probablyFail():
-                printContext(2, darken(80, ALERT_COLOR), showFunc=False)
-                with coloredOutput(ALERT_COLOR):
+                printContext(3, darken(80, Colors.ALERT), showFunc=False)
+                with coloredOutput(Colors.ALERT):
                     print(f"Warning: {func.__name__} will probably fail")
 
             def possiblyFail():
-                printContext(2, darken(80, CONFIDENCE_WARNING_COLOR), showFunc=False)
-                with coloredOutput(CONFIDENCE_WARNING_COLOR):
+                printContext(3, darken(80, Colors.CONFIDENCE_WARNING), showFunc=False)
+                with coloredOutput(Colors.CONFIDENCE_WARNING):
                     print(f"Warning: {func.__name__} might not work")
 
             def unknownInput():
-                raise TypeError(f"I don't recognize {level} as a confidence level.")
+                if interpretAs is None:
+                    raise TypeError(f"I don't recognize {level} as a confidence level.")
+
+                if interpretAs > 100:
+                    raise TypeError(f"You can't be {interpretAs}% confident, that's not how it works.")
+                elif interpretAs < 0:
+                    # replaceLine(f'\n\t\t\t\t\t\t"{level.lower()},', offset=+2)
+                    definiteFailResponses += (
+
+                    )
+                    definiteFail()
+                elif interpretAs < 20:
+                    # replaceLine(f'\n\t\t\t\t\t\t"{level.lower()},', offset=+2)
+                    probablyFailResponses += (
+
+                    )
+                    probablyFail()
+                elif interpretAs < 50:
+                    # replaceLine(f'\n\t\t\t\t\t\t"{level.lower()},', offset=+2)
+                    possiblyFailResponses += (
+
+                    )
+                    possiblyFail()
 
             if type(level) is int:
                 if level > 100:
@@ -713,16 +815,17 @@ def confidence(level):
                     possiblyFail()
             elif type(level) is str:
                 l = level.lower()
-                if l in CommonResponses.NO or l in CommonResponses.LOW_AMOUNT:
+                if l in CommonResponses.NO or l in CommonResponses.LOW_AMOUNT or l in probablyFailResponses:
                     probablyFail()
-                elif l in CommonResponses.MAYBE or l in CommonResponses.SOME_AMOUNT:
+                elif l in CommonResponses.MAYBE or l in CommonResponses.SOME_AMOUNT or l in possiblyFailResponses:
                     possiblyFail()
+                elif l in definiteFailResponses:
+                    definitelyFail()
                 elif l not in CommonResponses.YES and l not in CommonResponses.HIGH_AMOUNT and \
                      l not in CommonResponses.NA  and l not in CommonResponses.MODERATE_AMOUNT:
                     unknownInput()
             else:
                 unknownInput()
-
             return func(*funcArgs, **funcKwArgs)
         return innerWrap
     return wrap
@@ -731,8 +834,8 @@ confident = confidence
 def depricated(why=''):
     def wrap(func):
         def innerWrap(*funcArgs, **funcKwArgs):
-            printContext(2, darken(80, DEPRICATED_WARNING_COLOR))
-            with coloredOutput(DEPRICATED_WARNING_COLOR):
+            printContext(2, darken(80, Colors.DEPRICATED_WARNING))
+            with coloredOutput(Colors.DEPRICATED_WARNING):
                 print(f"{func.__name__} is Depricated{': ' if len(why) else '.'}{why}")
             return func(*funcArgs, **funcKwArgs)
         return innerWrap
@@ -747,17 +850,23 @@ def reprise(obj, *args, **kwargs):
 
 
 ################################### Iterable Utilities ###################################
-def isiterable(obj):
-    return isinstance(obj, Iterable)
+def isiterable(obj, includeStr=False):
+    return isinstance(obj, Iterable) and (type(obj) is not str if not includeStr else True)
 
 def ensureIterable(obj, useList=False):
-    if not isinstance(obj, Iterable):
+    if not isiterable(obj):
         return [obj, ] if useList else (obj, )
     else:
         return obj
 
 def ensureNotIterable(obj, emptyBecomes=_None):
-    if isinstance(obj, Iterable):
+    if isiterable(obj):
+        # Generators are iterable, but don't inherantly have a length
+        try:
+            len(obj)
+        except:
+            obj = list(obj)
+
         if len(obj) == 1:
             try:
                 return obj[0]
@@ -781,14 +890,49 @@ def flattenList(iterable, recursive=False, useList=True):
     return rtn
     # print(flattenList(('a', 'b', [1, 2, 3]), useList=False))
 
-def removeDuplicates(iterable):
-    return type(iterable)(set(iterable))
-
-def normalizeList(iterable, ensureList=False):
-    if ensureList:
-        return removeDuplicates(flattenList(ensureIterable(list(iterable), True)))
+def removeDuplicates(iterable, method='sorted set'):
+    method = method.lower()
+    if method == 'set':
+        return type(iterable)(set(iterable))
+    elif method == 'sorted set':
+        return list(sorted(set(iterable), key=lambda x: iterable.index(x)))
+    elif method == 'generator':
+        seen = set()
+        for item in seq:
+            if item not in seen:
+                seen.add( item )
+                yield item
+    elif method == 'manual':
+        dups = {}
+        newlist = []
+        for x in biglist:
+            if x['link'] not in dups:
+                newlist.append(x)
+                dups[x['link']] = None
+    elif method == 'other':
+        seen_links = set()
+        for index in len(biglist):
+            link = biglist[index]['link']
+            if link in seen_links:
+                del(biglist[index])
+            seen_links.add(link)
     else:
-        return ensureNotIterable(removeDuplicates(flattenList(ensureIterable(list(iterable), True))))
+        raise TypeError(f'Unknown removeDuplicates method: {method}. Options are: (set, sorted set, generator, manual, other)')
+
+# def removeRedundant(iterable):
+    # """ Remove any lists with only """
+    # if len(iterable) == 1:
+
+    # for i in iterable:
+    #     if isiterable(i) and
+
+@confidence(10)
+def normalizeList(iterable, ensureList=False):
+    debug()
+    if ensureList:
+        return list(removeDuplicates(flattenList(ensureIterable(list(iterable), True))))
+    else:
+        return list(ensureNotIterable(removeDuplicates(flattenList(ensureIterable(list(iterable), True)))))
 
 def getIndexWith(obj, key):
     """ Returns the index of the first object in a list in which key returns true to.
@@ -853,7 +997,7 @@ def _printTimingData(accuracy=5):
         maxNum  = len(str(len(max(timingData.values(), key=lambda x: len(str(len(x)))))))
         for name, times in reversed(sorted(timingData.items(), key=lambda x: sum(x[1]))):
             print(f'{name:<{maxName}} was called {len(times):<{maxNum}} times taking {sum(times)/len(times):.{accuracy}f} seconds on average for a total of {sum(times):.{accuracy}f} seconds.')
-atexit.register(_printTimingData)
+registerExit(_printTimingData)
 
 class getTime:
     """ A class to use with a with statement like so:
@@ -899,6 +1043,7 @@ class Signal:
     """ A custom Signal implementation. Connect with the connect() function """
     def __init__(self):
         self.funcs = []
+        self.call = self.__call__
 
     def connect(self, func, *args, **kwargs):
         self.funcs.append(FunctionCall(func, args, kwargs))
@@ -914,6 +1059,568 @@ class Signal:
             f(*args, override_args=override_args, **kwargs)
 
         # return rtns[0] if len(rtns) <= 1 else rtns
+
+class _Key(Enum):
+    unknown=0
+    space=32; exclamation=33; doubleQuote=34; pound=hashtag=35; dollarSign=36; percent=37; andersand=38; singleQuote=39; openParen=40; closeParen=41; star=42; plus=43; comma=44; minus=45; period=46; slash=forwardSlash=47
+    one=48; two=49; three=50; four=51; five=52; six=53; seven=54; eight=55; nine=56; zero=57
+    colon=58; semicolon=59; lessThan=60; equals=61; greaterThan=62; question=63; attersand=64
+    A=65; B=66; C=67; D=68; E=69; F=70; G=71; H=72; I=73; J=74; K=75; L=76; M=77; N=78; O=79; P=80; Q=81; R=82; S=83; T=84; U=85; V=86; W=87; X=88; Y=89; Z=90
+    openSquareBracket=91; backslash=92; closeSquareBracket=93; exponent=94; underscore=95; sidilla=96
+    a=97; b=98; c=99; d=100; e=101; f=102; g=103; h=104; i=105; j=106; k=107; l=108; m=109; n=110; o=111; p=112; q=113; r=114; s=115; t=116; u=117; v=118; w=119; x=120; y=121; z=122
+    openCurlyBrace=123; orLine=124; closeCurlyBrace=125; tilde=126
+
+    F1=131; F2=132; F3=133; F4=134; F5=135; F6=136; F7=137; F8=138; F9=139; F10=140; F11=141; F12=142; F13=143; F14=144; F15=145; F16=146
+    F17=147; F18=148; F19=149; F20=150; F21=151; F22=152; F23=153; F24=154; F25=155; F26=156; F27=157; F28=158; F29=159; F30=160
+
+    escape=27
+    delete=127; backspace=auto()
+    home=auto(); end=auto()
+    enter=auto()
+    shift=auto(); ctrl=auto(); win=command=auto(); alt=auto()
+    insert=auto(); pageUp=auto(); pageDown=auto()
+    up=auto(); down=auto(); left=auto(); right=auto()
+    printScreen=auto(); scrollLock=auto();
+    pause=auto(); break_=auto()
+    numLock=auto()
+
+class Key:
+    """ A generalized Key class to bridge the gap between several standards.
+        when possible, constants are set to their ascii values. The other keys use auto()
+        F1-F30 are mapped to 131-160 arbitrarily
+        Mouse buttons are not included.
+    """
+    _psuedonyms = {
+        'spacebar': _Key.space,
+        'windowskey': _Key.win,
+        'at': _Key.attersand,
+        'and': _Key.andersand,
+        'questionmark': _Key.question,
+        'exclamationmark': _Key.exclamation,
+        'exclamationpoint': _Key.exclamation,
+        "\'": _Key.singleQuote,
+        "\"": _Key.doubleQuote,
+        "\\": _Key.backslash,
+        "`": _Key.sidilla,
+        "~": _Key.tilde,
+        "!": _Key.exclamation,
+        "@": _Key.attersand,
+        "#": _Key.pound,
+        "$": _Key.dollarSign,
+        "%": _Key.percent,
+        "^": _Key.exponent,
+        "&": _Key.andersand,
+        "*": _Key.star,
+        "(": _Key.openParen,
+        ")": _Key.closeParen,
+        "_": _Key.underscore,
+        "+": _Key.plus,
+        "{": _Key.openCurlyBrace,
+        "}": _Key.closeCurlyBrace,
+        "|": _Key.orLine,
+        ":": _Key.colon,
+        "<": _Key.lessThan,
+        ">": _Key.greaterThan,
+        "?": _Key.question,
+        "1": _Key.one,
+        "2": _Key.two,
+        "3": _Key.three,
+        "4": _Key.four,
+        "5": _Key.five,
+        "6": _Key.six,
+        "7": _Key.seven,
+        "8": _Key.eight,
+        "9": _Key.nine,
+        "0": _Key.zero,
+        "-": _Key.minus,
+        "=": _Key.equals,
+        "[": _Key.openSquareBracket,
+        "]": _Key.closeSquareBracket,
+        ",": _Key.comma,
+        ".": _Key.period,
+        "/": _Key.forwardSlash,
+        ';': _Key.semicolon,
+        "backspace": _Key.backspace,
+        "return": _Key.enter,
+        "cmd": _Key.command,
+    }
+
+    @staticmethod
+    def parseKey(key:str) -> int:
+        err = TypeError(f'"{key}" is an invalid key')
+
+        try:
+            return getattr(_Key, key)
+        except AttributeError:
+            key = key.lower()
+            try:
+                return getattr(_Key, key)
+            except AttributeError:
+                if key in Key._psuedonyms.keys():
+                    return Key._psuedonyms[key]
+                else:
+                    raise err
+
+    def _parseParam(self, key)->int:
+        if type(key) is _Key:
+            key = _Key.key
+
+        if type(key) is str:
+            return self.parseKey(key)
+        elif type(key) in int:
+            if isBetween(key, 1, 9):
+                return key + 48
+            elif key == 0:
+                return 57
+            elif isBetween(key, 32, 127):
+                return key
+            else:
+                raise TypeError(f'{key} is an invalid ascii character, or is not implemented')
+
+    def __init__(self, key:Union[_Key, str, int]):
+        self.key = self._parseParam(key)
+
+    def __eq__(self, other):
+        if type(other) is Key:
+            return self.key == other.key
+        elif type(other) is _Key:
+            return self.key == other
+        elif type(other) is str:
+            return self.key == self._parseParam(other)
+        else:
+            return TypeError(f"Cannot compare types of {type(other).__name__} and Key")
+
+    def __hash__(self):
+        return hash(self.key)
+
+    def __getattr__(self, key):
+        debug()
+        return Key(self._parseParam(key))
+
+    def __str__(self):
+        return str(self.key)
+# modifierKeys = (Key.shift, Key.ctrl, Key.win, Key.alt)
+modifierKeys = (Key("shift"), Key("ctrl"), Key("win"), Key("alt"))
+
+class KeyShortcut:
+    def __init__(self, *keys):
+        self.triggered = Signal()
+        self.keys = keys
+        self.activeMods = dict(zip(modifierKeys, (False,) * len(modifierKeys)))
+
+    def update(self, key, pressed):
+        if key in modifierKeys:
+           self.activeMods[key] = pressed
+
+        valid = True
+        for i in self.keys:
+            if i in modifierKeys:
+                if not self.activeMods[i]:
+                    valid = False
+            else:
+                if key != i:
+                    valid = False
+
+        if valid:
+            self.triggered.call()
+
+@todo
+class KeyChord:
+    pass
+
+class KeySequence:
+    triggered = Signal()
+    def __init__(self, *keySequence):
+        self.sequence = keySequence
+        self.activeMods = dict(zip(modifierKeys, (False,) * len(modifierKeys)))
+        self.currentSequence = []
+
+    def update(self, key, pressed):
+        todo('not finished', blocking=True)
+        if key in modifierKeys:
+           self.activeMods[key] = pressed
+
+        self.currentSequence.append(key)
+
+        valid = True
+        for i in self.keys:
+            if i in modifierKeys:
+                if not self.activeMods[i]:
+                    valid = False
+            else:
+                if key != i:
+                    valid = False
+
+        if valid:
+            triggered.call()
+        else:
+            self.currentSequence = []
+
+# TODO add the __roperator__ functions
+class MappingList(list):
+    """ An iterable that functions exactly like a list, except any operators applied to it
+        are applied equally to each of it's memebers, and return a mapping list instance.
+    """
+    unmatchedLenError = TypeError('Cannot evaluate 2 MappingLists of differing length')
+    def __init__(self, *args):
+        super().__init__(ensureIterable(ensureNotIterable(args)))
+
+    def apply(self, func:Union[Callable, 'MappingList'], *args, **kwargs):
+        """ Call a function with parameters on each item """
+        if type(func) is MappingList and len(func) == len(self):
+            self = MappingList([i(k, *args, **kwargs) for i, k in (func, self)])
+        else:
+            for i in range(len(self)):
+                self[i] = func(self[i], *args, **kwargs)
+        return self
+
+    def call(self, func:Union[str, 'MappingList'], *args, **kwargs):
+        """ Call a member function with parameters on each item """
+        if type(func) is MappingList and len(func) == len(self):
+            self = MappingList([i.__getattribute__(k)(*args, **kwargs) for i, k in (func, self)])
+        else:
+            for i in range(len(self)):
+                self[i] = self[i].__getattribute__(func)(*args, **kwargs)
+        return self
+
+    def attr(self, attr:Union[str, 'MappingList']):
+        """ Replace each item with it's attribute """
+        if type(attr) is MappingList and len(attr) == len(self):
+            self = MappingList([i.__getattribute__(k) for i, k in (attr, self)])
+        else:
+            for i in range(len(self)):
+                self[i] = self[i].__getattribute__(attr)
+        return self
+
+    def lengths(self):
+        return ensureNotIterable(MappingList([len(i) for i in self]))
+
+    def __getattr__(self, name):
+        self = MappingList([i.__getattribute__(name) for i in self])
+        return self
+
+    def __call__(self, *args, **kwargs):
+        for i in range(len(self)):
+            self[i] = self[i](*args, **kwargs)
+        return self
+
+    def __hash__(self):
+        return hash(tuple(self))
+
+    def __cmp__(self, other):
+        if type(other) is MappingList:
+            if len(other) == len(self):
+                return MappingList([i.__cmp__(k) for i, k in (other, self)])
+            else:
+                raise MappingList.unmatchedLenError
+        else:
+            return super().__cmp__(other)
+
+    def __pos__(self):
+        for i in range(len(self)):
+            self[i] = +self[i]
+        return self
+
+    def __neg__(self):
+        for i in range(len(self)):
+            self[i] = -self[i]
+        return self
+
+    def __abs__(self):
+        for i in range(len(self)):
+            self[i] = abs(self[i])
+        return self
+
+    def __invert__(self):
+        for i in range(len(self)):
+            self[i] = ~self[i]
+        return self
+
+    def __round__(self, n):
+        for i in range(len(self)):
+            self[i] = round(self[i], n)
+        return self
+
+    def __floor__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__floor__()
+        return self
+
+    def __ceil__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__ceil__()
+        return self
+
+    def __trunc__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__trunc__()
+        return self
+
+    def __add__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__add__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__add__(other) for i in self])
+
+    def __sub__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__sub__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__sub__(other) for i in self])
+
+    def __mul__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__mul__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__mul__(other) for i in self])
+
+    def __floordiv__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.____(__floordiv__) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__floordiv__(other) for i in self])
+
+    def __truediv__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.____(__truediv__) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__truediv__(other) for i in self])
+
+    def __mod__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__mod__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__mod__(other) for i in self])
+
+    def __divmod__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__divmod__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__divmod__(other) for i in self])
+
+    def __pow__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__pow__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__pow__(other) for i in self])
+
+    def __lshift__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__lshift__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__lshift__(other) for i in self])
+
+    def __rshift__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__rshift__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__rshift__(other) for i in self])
+
+    def __and__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__and__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__and__(other) for i in self])
+
+    def __or__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__or__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__or__(other) for i in self])
+
+    def __xor__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            return MappingList(*[i.__xor__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            return MappingList(*[i.__xor__(other) for i in self])
+
+    def __iadd__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__add__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__add__(other) for i in self])
+        return self
+
+    def __isub__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__sub__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__sub__(other) for i in self])
+        return self
+
+    def __imul__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__mul__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__mul__(other) for i in self])
+        return self
+
+    def __ifloordiv__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__floordiv__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__floordiv__(other) for i in self])
+        return self
+
+    def __itruediv__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__truediv__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__truediv__(other) for i in self])
+        return self
+
+    def __imod__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__mod__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__mod__(other) for i in self])
+        return self
+
+    def __idivmod__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__divmod__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__divmod__(other) for i in self])
+        return self
+
+    def __ipow__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__pow__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__pow__(other) for i in self])
+        return self
+
+    def __ilshift__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__lshift__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__lshift__(other) for i in self])
+        return self
+
+    def __irshift__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__rshift__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__rshift__(other) for i in self])
+        return self
+
+    def __iand__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__and__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__and__(other) for i in self])
+        return self
+
+    def __ior__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__or__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__or__(other) for i in self])
+        return self
+
+    def __ixor__(self, other):
+        if type(other) is MappingList and len(other) == len(self):
+            self = MappingList(*[i.__xor__(k) for i, k in zip(other, self)])
+        elif type(other) is MappingList:
+            raise MappingList.unmatchedLenError
+        else:
+            self = MappingList(*[i.__xor__(other) for i in self])
+        return self
+
+    def __int__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__int__()
+        return self
+
+    def __long__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__long__()
+        return self
+
+    def __float__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__float__()
+        return self
+
+    def __complex__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__complex__()
+        return self
+
+    def __oct__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__oct__()
+        return self
+
+    def __hex__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__hex__()
+        return self
+
+    def __index__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__index__()
+        return self
+
+    def __trunc__(self):
+        for i in range(len(self)):
+            self[i] = self[i].__trunc__()
+        return self
+
+    def __coerce__(self, other):
+        for i in range(len(self)):
+            self[i] = self[i].__coerce__(other)
+        return self
 
 
 ################################### Misc. Useful Functions ###################################
@@ -1034,6 +1741,67 @@ def normalize2deg(a):
 def portFilename(filename):
     return join(*filename.split('/'))
 
+def assertValue(param, *values, blocking=True):
+    paramName = _debugGetVarName(param)
+    if not _debugBeingUsedAsDecorator('assertValue'):
+        if param not in values:
+            err = TypeError(f"Invalid value for {paramName}, must be one of: {values}")
+            if blocking:
+                raise err
+            else:
+                debug(err)
+    else:
+        todo('usage as a decorator')
+
+@confidence(72)
+def replaceLine(line, offset=0, keepTabs=True, convertTabs=True, additionalCalls=0):
+    """ Replaces the line of code this is called from with the give line parameter.
+        This is probably a very bad idea to actually use.
+        Don't forget to add tabs! Newline is already taken care of (unless you want to add more).
+    """
+    meta = _debugGetMetaData(calls=2 + additionalCalls)
+
+    with open(meta.filename, 'r') as f:
+        file = f.readlines()
+
+    # Not really sure of the reason for the -1.
+    if file[meta.lineno-1] == meta.code_context[0]:
+        if keepTabs:
+            tabs = rematch(file[meta.lineno-1 + offset], r'\s+')
+            if tabs:
+                line = tabs.string + line
+
+        if convertTabs:
+            line = line.replace('\t', '    ')
+
+        file[meta.lineno-1 + offset] = line + '\n'
+
+    else:
+        debug(f"Error: lines don't match, not replacing line.\n\tMetadata: \"{meta.code_context}\"\n\tFile: \"{file[meta.lineno-1]}\"", clr=Colors.ERROR)
+        return
+
+    with open(meta.filename, 'w') as f:
+        f.writelines(file)
+
+@confidence(85)
+def fancyComment(title='', char='#', endChar='#', lineLimit=80):
+    """ Replaces the call with a nicely formatted comment line """
+    halfLen = ((lineLimit / len(char)) - len(title) - 1 - (2 if len(title) else 0) - len(endChar)) / 2
+    seperateChar = ' ' if len(title) else ''
+    replaceLine('#' + (char * ceil(halfLen)) + seperateChar + title.title() + seperateChar + (char * floor(halfLen)) + endChar, keepTabs=False, additionalCalls=1)
+
+
+def umpteenthName(i:int) -> "1st, 2nd, 3rd, etc.":
+    i = str(i)
+    if i[-1] == '1' and (i != '11'):
+        return i + 'st'
+    elif i[-1] == '2' and (i[0] != '1'):
+        return i + 'nd'
+    elif i[-1] == '3' and (i[0] != '1'):
+        return i + 'rd'
+    else:
+        return i + 'th'
+
 
 ################################### API Specific functions ###################################
 #* PrettyTable
@@ -1046,8 +1814,13 @@ def quickTable(listOfLists, interpretAsRows=True, fieldNames=None, returnStr=Fal
             t.field_names = fieldNames
         t.add_rows(listOfLists)
     else:
-        for i in listOfLists:
-            t.add_column(str(i[0]), i[1:])
+        if fieldNames is not None:
+            for i, name in zip(listOfLists, fieldNames):
+                t.add_column(name, i)
+        else:
+            for i in listOfLists:
+                t.add_column(str(i[0]), i[1:])
+
     if sortByField:
         t.sortby = sortByField
         t.reversesort = sortedReverse
@@ -1241,206 +2014,299 @@ def decorator(*decoratorArgs, **decoratorKwArgs):
     return wrap
 """
 
-
 ################################### Tests ###################################
-#* parseColorParams tests
-if False:
-    # setVerbose(True)
-    # debug(parseColorParams((5, 5, 5)) )
-    # debug(parseColorParams((5, 5, 5), True) )
-    # debug(parseColorParams((5, 5, 5, 6)) )
-    # debug(parseColorParams((5, 5, 5, 6), True) )
-    # debug(parseColorParams([5, 5, 5, 6]) )
-    # debug(parseColorParams(5, 5, 5) )
-    # debug(parseColorParams(5, 5, 5, True) )
-    # debug(parseColorParams(5, 5, 5, 6) )
-    # debug(parseColorParams(5, 5, 5, bg=True) )
-    # debug(parseColorParams(5, 5, 5, 6, True) )
-    # debug(parseColorParams(3) )
-    # debug(parseColorParams(3, bg=True)
-    # debug(parseColorParams((3,)) ) # Succeeded
-    # debug(parseColorParams(3, a=6) )
-    # debug(parseColorParams(3, a=6, bg=True) )
-    # debug(parseColorParams(None) )
-    # debug(parseColorParams(None, bg=True) )
-    pass
+if ENABLE_TESTING:
+    displayAllPaths()
+    #* parseColorParams tests
+    if False:
+        # setVerbose(True)
+        # debug(parseColorParams((5, 5, 5)) )
+        # debug(parseColorParams((5, 5, 5), True) )
+        # debug(parseColorParams((5, 5, 5, 6)) )
+        # debug(parseColorParams((5, 5, 5, 6), True) )
+        # debug(parseColorParams([5, 5, 5, 6]) )
+        # debug(parseColorParams(5, 5, 5) )
+        # debug(parseColorParams(5, 5, 5, True) )
+        # debug(parseColorParams(5, 5, 5, 6) )
+        # debug(parseColorParams(5, 5, 5, bg=True) )
+        # debug(parseColorParams(5, 5, 5, 6, True) )
+        # debug(parseColorParams(3) )
+        # debug(parseColorParams(3, bg=True)
+        # debug(parseColorParams((3,)) ) # Succeeded
+        # debug(parseColorParams(3, a=6) )
+        # debug(parseColorParams(3, a=6, bg=True) )
+        # debug(parseColorParams(None) )
+        # debug(parseColorParams(None, bg=True) )
+        pass
 
-#* debug tests
-if False:
-    # setVerbose(True)
-    a = 6
-    s = 'test'
-    j = None
-    def testFunc():
-        print('testFunc called')
+    #* debug tests
+    if False:
+        # setVerbose(True)
+        """
+        a = 6
+        s = 'test'
+        j = None
+        def testFunc():
+            print('testFunc called')
 
-    debug(a)
-    debug(a, 'apple')
+        debug(a)
+        debug(a, 'apple')
 
-    debug('test3')
-    debug(s)
+        debug('test3')
+        debug(s)
 
-    debug(j)
-    debug()
+        debug(j)
+        debug()
 
-    debug(testFunc)
+        debug(testFunc)
 
-    foo = debug(a)
-    debug(foo)
+        foo = debug(a)
+        debug(foo)
 
-    debug(parseColorParams((5, 5, 5)) )
+        debug(parseColorParams((5, 5, 5)) )
 
-    debug(SyntaxError('Not an error'))
-    try:
-        debug(SyntaxError('Not an error'), raiseError=True)
-    except SyntaxError:
-        print('SyntaxError debug test passed!')
-    else:
-        print('SyntaxError debug test failed.')
+        debug(SyntaxError('Not an error'))
+        try:
+            debug(SyntaxError('Not an error'), raiseError=True)
+        except SyntaxError:
+            print('SyntaxError debug test passed!')
+        else:
+            print('SyntaxError debug test failed.')
 
-    debug(UserWarning('Not a warning'))
-    try:
-        debug(UserWarning('Not a warning'), raiseError=True)
-    except UserWarning:
-        print('UserWarning debug test passed!')
-    else:
-        print('UserWarning debug test failed.')
+        debug(UserWarning('Not a warning'))
+        try:
+            debug(UserWarning('Not a warning'), raiseError=True)
+        except UserWarning:
+            print('UserWarning debug test passed!')
+        else:
+            print('UserWarning debug test failed.')
 
-    @debug
-    def testFunc2():
-        print('testFunc2 (decorator test) called')
+        @debug
+        def testFunc2():
+            print('testFunc2 (decorator test) called')
 
-    debug()
+        debug()
 
-    testFunc2()
+        testFunc2()
 
-    debug(None)
+        debug(None)
+        """
+        TUPLE = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+        LIST  = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        DICT  = {'a':1, 'b':2, 'c': 3}
+        TYPE_LIST = ['a', 2, 7.4, 3]
+        TYPE_TUPLE = ('a', 2, 7.4, 3)
 
-    TUPLE = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
-    LIST  = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-    DICT  = {'a':1, 'b':2, 'c': 3}
-    TYPE_LIST = ['a', 2, 7.4, 3]
-    TYPE_TUPLE = ('a', 2, 7.4, 3)
+        debug([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], raiseError=True)
+        debug((0, 1, 2, 3, 4, 5, 6, 7, 8, 9), raiseError=True)
+        debug({'a':1, 'b':2, 'c': 3}, raiseError=True)
+        debug(['a', 2, 7.4, 3], raiseError=True)
+        debug(('a', 2, 7.4, 3), raiseError=True)
+        debug()
+        debug(TUPLE, raiseError=True)
+        debug(LIST, raiseError=True)
+        debug(DICT, raiseError=True)
+        debug(TYPE_LIST, raiseError=True)
+        debug(TYPE_TUPLE, raiseError=True)
 
-    debug([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], raiseError=True)
-    debug((0, 1, 2, 3, 4, 5, 6, 7, 8, 9), raiseError=True)
-    debug({'a':1, 'b':2, 'c': 3}, raiseError=True)
-    debug(['a', 2, 7.4, 3], raiseError=True)
-    debug(('a', 2, 7.4, 3), raiseError=True)
-    debug()
-    debug(TUPLE, raiseError=True)
-    debug(LIST, raiseError=True)
-    debug(DICT, raiseError=True)
-    debug(TYPE_LIST, raiseError=True)
-    debug(TYPE_TUPLE, raiseError=True)
+        debug(())
+        debug([])
+        debug({})
+        debug(set())
 
-#* todo tests
-if False:
-    todo('testing todo')
-    todo('testing todo 2', False)
+    #* todo tests
+    if False:
+        todo('testing todo')
+        todo('testing todo 2', False)
 
-    @todo
-    def unfinishedFunc():
-        print("this func is unfin")
+        @todo
+        def unfinishedFunc():
+            print("this func is unfin")
 
-    try:
-        unfinishedFunc()
-    except NotImplementedError:
-        print("func decorator test worked!")
-    else:
-        print("func decorator test failed.")
+        try:
+            unfinishedFunc()
+        except NotImplementedError:
+            print("func decorator test worked!")
+        else:
+            print("func decorator test failed.")
 
-    @todo(blocking=False)
-    def unfinishedFunc2():
-        print("this non Blocking func is unfin")
+        @todo(blocking=False)
+        def unfinishedFunc2():
+            print("this non Blocking func is unfin")
 
-    unfinishedFunc2()
+        unfinishedFunc2()
 
-    @todo
-    class unfinishedClass:
-        def __init__(self):
-            print('this class is unfin')
+        @todo
+        class unfinishedClass:
+            def __init__(self):
+                print('this class is unfin')
 
-    try:
-        x = unfinishedClass()
-    except NotImplementedError:
-        print("class decorator test worked!")
-    else:
-        print("class decorator test failed.")
+        try:
+            x = unfinishedClass()
+        except NotImplementedError:
+            print("class decorator test worked!")
+        else:
+            print("class decorator test failed.")
 
-#* Decorator Testing
-if False:
-    def decorator(*decoratorArgs, **decoratorKwArgs):
-        def wrap(functionBeingDecorated):
-            def innerWrap(*decoratedArgs, **decoratedKwArgs):
-                debug(decoratorArgs)
-                debug(decoratorKwArgs)
-                debug(functionBeingDecorated)
-                debug(decoratedArgs)
-                debug(decoratedKwArgs)
-                return functionBeingDecorated(*decoratedArgs, **decoratedKwArgs)
-            return innerWrap
-        return wrap
+    #* Decorator Testing
+    if False:
+        def decorator(*decoratorArgs, **decoratorKwArgs):
+            def wrap(functionBeingDecorated):
+                def innerWrap(*decoratedArgs, **decoratedKwArgs):
+                    debug(decoratorArgs)
+                    debug(decoratorKwArgs)
+                    debug(functionBeingDecorated)
+                    debug(decoratedArgs)
+                    debug(decoratedKwArgs)
+                    return functionBeingDecorated(*decoratedArgs, **decoratedKwArgs)
+                return innerWrap
+            return wrap
 
-    @decorator("decoratorArg1", "decoratorArg2", decoratorKwArg="decoratorKwValue")
-    def testFunc(funcArg1, funcArg2, funcKwArg='funcKwArg'):
-        debug(funcArg1)
-        debug(funcArg2)
-        debug(funcKwArg)
+        @decorator("decoratorArg1", "decoratorArg2", decoratorKwArg="decoratorKwValue")
+        def testFunc(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+            debug(funcArg1)
+            debug(funcArg2)
+            debug(funcKwArg)
 
-    testFunc("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+        testFunc("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
 
-#* Confidence Testing
-if False:
-    @confidence(29)
-    def testFunc(funcArg1, funcArg2, funcKwArg='funcKwArg'):
-        debug(funcArg1)
-        debug(funcArg2)
-        debug(funcKwArg)
+    #* Confidence Testing
+    if False:
+        @confidence(29)
+        def testFunc(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+            debug(funcArg1)
+            debug(funcArg2)
+            debug(funcKwArg)
 
-    @confident(102)
-    def testFunc2(funcArg1, funcArg2, funcKwArg='funcKwArg'):
-        debug(funcArg1)
-        debug(funcArg2)
-        debug(funcKwArg)
+        @confident(102)
+        def testFunc2(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+            debug(funcArg1)
+            debug(funcArg2)
+            debug(funcKwArg)
 
-    @confident(16)
-    def testFunc3(funcArg1, funcArg2, funcKwArg='funcKwArg'):
-        debug(funcArg1)
-        debug(funcArg2)
-        debug(funcKwArg)
+        @confident(16)
+        def testFunc3(funcArg1, funcArg2, funcKwArg='funcKwArg'):
+            debug(funcArg1)
+            debug(funcArg2)
+            debug(funcKwArg)
 
-    @confidence('super')
-    def testFunc4(): pass
+        @confidence('super')
+        def testFunc4(): pass
 
-    @confidence('not very')
-    def testFunc5(): pass
+        @confidence('not very')
+        def testFunc5(): pass
 
-    @confidence('none')
-    def testFunc6(): pass
+        @confidence('none')
+        def testFunc6(): pass
 
-    @confidence('low')
-    def testFunc7(): pass
+        @confidence('low')
+        def testFunc7(): pass
 
-    @confidence('Sorta')
-    def testFunc8(): pass
+        @confidence('Sorta')
+        def testFunc8(): pass
 
-    @confidence('asfgs')
-    def testFunc9(): pass
+        @confidence('asfgs')
+        def testFunc9(): pass
 
-    try:
-        testFunc2("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
-    except TypeError:
-        print('testFunc2 worked')
+        @confidence('confident', 100)
+        def testFunc10(): pass
 
-    testFunc( "calledArg1", 'calledArg2', funcKwArg='calledKwArg')
-    testFunc3("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
-    testFunc4()
-    testFunc5()
-    testFunc6()
-    testFunc7()
-    testFunc8()
-    try:
-        testFunc9()
-    except TypeError:
-        print('testFunc9 worked')
+        @confidence('not confident', 0)
+        def testFunc11(): pass
+
+        try:
+            testFunc2("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+        except TypeError:
+            print('testFunc2 worked')
+
+        testFunc( "calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+        testFunc3("calledArg1", 'calledArg2', funcKwArg='calledKwArg')
+        testFunc4()
+        testFunc5()
+        testFunc6()
+        testFunc7()
+        testFunc8()
+        testFunc10()
+        testFunc11()
+        try:
+            testFunc9()
+        except TypeError:
+            print('testFunc9 worked')
+
+    #* Mapping list tests
+    if False:
+        debug(MappingList())
+        debug(MappingList(1, 2, 3))
+        debug(MappingList((1, 2, 3)))
+        debug(MappingList([1, 2, 3]))
+        m = MappingList(1, 2, 3)
+        debug(m)
+        debug(m+3)
+        debug(m-3)
+        m += 4
+        debug(m)
+
+        m = MappingList('hello', 'world')
+        debug(m)
+        m += '!'
+        debug(m)
+        try:
+            debug(m / 4)
+        except AttributeError:
+            print('First Error test worked')
+        else:
+            print('First Error test failed')
+
+        debug(MappingList(1, 2, 3) * MappingList(2, 2, 4))
+        # try:
+            # debug(MappingList(1, 2, 3) * MappingList(2, 2))
+        # except TypeError:
+            # print('Second error test worked')
+        # else:
+            # print('Second error test failed')
+        # debug(MappingList(1, 2, 3) * MappingList(2))
+        debug(MappingList(1, 2, 3) * 2)
+
+        t = MappingList('testing')
+        debug(t)
+        debug(t+' success')
+        debug(t.istitle)
+        debug(t.replace('t', '|'))
+        debug(t.upper())
+        t += ' tests'
+        debug(t)
+
+    #* Replace Line tests
+    if False:
+
+        # replaceLine("\t\t# This Line has been replaced! 1", -1)
+        # replaceLine("\t\t# This Line has been replaced! 2")
+        # replaceLine("# This Line has been replaced! 3")
+
+        # replaceLine("\t\t# This Line has been replaced! 1", -1)
+        # replaceLine("\t\t# This Line has been replaced! 2")
+        # replaceLine("# This Line has been replaced! 3")
+
+        fancyComment()
+        fancyComment(char='~')
+        fancyComment(lineLimit=30)
+        fancyComment('Seperator!')
+        fancyComment('Seperator!', '~')
+        fancyComment('Seperator!', '~', '{')
+        fancyComment('Seperator!', '~', '{', 50)
+
+        # fancyComment()
+        # fancyComment(char='~')
+        # fancyComment(lineLimit=30)
+        # fancyComment('Seperator!')
+        # fancyComment('Seperator!', '~')
+        # fancyComment('Seperator!', '~', '{')
+        # fancyComment('Seperator!', '~', '{', 50)
+
+    #* Key testing
+    if False:
+        print(Key.one)
+        print(Key('one'))
+        print(Key('exclamation'))
+        print(Key('exclamationmark'))
+        print(Key('exclamationPoint'))
